@@ -1,1 +1,19 @@
-# Structure placeholder; implementation pending.
+# HoneyPrint shared framework configuration.
+# This file defines the initial configuration format; the loader and validator
+# will be implemented next. It does not install or launch platform software.
+schema_version: 1
+
+# Instance entries will select registered OctoPrint, Klipper or custom adapters.
+# Keep this list empty until an adapter and its deployment recipe are ready.
+# See configs/instances/ for future platform-specific configuration examples.
+# Each instance will require a unique id, platform, deployment mode,
+# printer_profile, compatible simulation provider and service ports.
+instances: []
+
+# Shared observation settings. SQLite is the planned first storage backend.
+# Enabling these flags requests supported instrumentation; it does not create it.
+telemetry:
+  backend: sqlite
+  capture_requests: true
+  capture_commands: true
+  capture_state_changes: true
