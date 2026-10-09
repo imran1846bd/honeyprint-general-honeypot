@@ -1,0 +1,1 @@
+# Structure placeholder; implementation pending.

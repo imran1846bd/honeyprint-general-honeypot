@@ -20,30 +20,25 @@ Passive instrumentation -> normalized events -> bounded collector
 Persistent evidence store -> read-only dashboard / experiments
 ```
 
-See [GitHub setup](docs/github_setup.md), [architecture](docs/architecture.md), [research questions](docs/research_questions.md), and [roadmap](docs/roadmap.md). An academic design document can be added to `docs/papers/` after authors' review.
+## Current scaffold
 
-## What works in this starter
+The repository currently contains folders and placeholder files only. No executable CLI, configuration validation, deployment, simulation, telemetry collection, or tests have been implemented yet. YAML files are placeholders; the example below describes the intended configuration format.
 
-- CLI to **validate** YAML, show a **non-executing deployment plan**, and list registered adapters.
-- Minimal registry, adapter contract, capability verification, port and ID checks, tests.
-- Example configurations for OctoPrint, Klipper and a developer-owned custom adapter.
-- Template for approved adapter development and normalized event schema.
-
-**Not yet implemented:** actual software installation, Docker orchestration, OctoPrint instrumentation, Klipper virtual MCU, custom service execution, AM simulator, persistent collector and analysis dashboard. The starter intentionally fails closed rather than pretend to launch them.
-
-## Quick start
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate                 # Windows: .venv\Scripts\activate
-pip install -e '.[dev]'
-honeyprint adapters
-honeyprint validate configs/examples/octoprint.yaml
-honeyprint plan configs/examples/klipper.yaml
-pytest -q
+```text
+configs/       Framework and instance YAML, printer and manufacturing profiles
+core/          Configuration, validation, registry, dependencies and lifecycle
+adapters/      Base adapter, OctoPrint, Klipper/Moonraker and custom adapters
+plugins/       Services, firmware, simulators, AM stages and security extensions
+deployment/    Recipes, Docker assets and environment management
+telemetry/     Collection, normalization, storage and analysis
+dashboard/     Planned read-only dashboard
+sdk/           Planned extension SDK
+tests/         Future validation and integration tests
+examples/      Future usage examples
+main.py        Entry-point placeholder
 ```
 
-To implement OctoPrint or Klipper, first add a **verified, version-pinned deployment recipe** and integration tests under `deployment/recipes/`, then implement its adapter hooks. Never expose an unreviewed image or live device just because a YAML field requests it.
+Empty directories are tracked using `.gitkeep`. Python and YAML placeholders identify where implementation will be added.
 
 ## Basic YAML
 
@@ -61,8 +56,8 @@ telemetry: {backend: sqlite, capture_commands: true}
 
 ## Development
 
-Read [developer guide](docs/developer_guide.md) and [security boundaries](SECURITY.md). Open issues via the supplied GitHub templates. Contributions are welcome after research-team review. No claim of production readiness, attack detection accuracy, device authenticity or Klipper simulation fidelity is made.
+Implementation, developer documentation, security documentation and contribution templates remain future work. No claim of production readiness, attack detection accuracy, device authenticity or Klipper simulation fidelity is made.
 
 ## License and citation
 
-Choose an open-source license with the supervisor/institution **before public release** (see `LICENSE-TO-CHOOSE.md`). A `CITATION.cff.template` template is included and requires author/DOI review. The repository does not include third-party OctoPrint, Klipper, Moonraker or Mainsail source code.
+Choose an open-source license with the supervisor/institution **before public release** and add a reviewed citation file when author and publication details are available. The repository does not include third-party OctoPrint, Klipper, Moonraker or Mainsail source code.
