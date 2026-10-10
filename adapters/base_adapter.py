@@ -41,8 +41,10 @@ class PlatformAdapter(ABC):
     def capabilities(self) -> Mapping[str, Any]:
         """Describe implemented modes, simulators, services and supported stages.
 
-        Runtime versions and recipe constraints should also be declared. The
-        capability schema will be defined with the deployment planner.
+        Declare deployment, simulators, services and stages as identifier lists.
+        Optional lists cover extensions, frontends, apis and instrumentation.
+        A recipes mapping assigns a registered recipe ID to each deployment
+        mode. The selected recipe declares explicit software version pins.
         """
         raise NotImplementedError
 

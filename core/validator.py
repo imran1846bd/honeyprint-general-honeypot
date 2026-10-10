@@ -23,7 +23,7 @@ _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]*\Z")
 _ROOT_KEYS = {"schema_version", "instances", "telemetry"}
 _INSTANCE_KEYS = {
     "id", "platform", "adapter", "deployment", "printer_profile", "simulation",
-    "services", "stages", "instrumentation", "frontend", "api", "extensions",
+    "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
 }
 _TELEMETRY_KEYS = {
     "backend", "capture_requests", "capture_commands", "capture_state_changes",
@@ -123,6 +123,8 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
                         registered("instrumentation", value, f"{loc}.instrumentation.plugin")
                     elif type(value) is not bool:
                         issues.append(f"{loc}.instrumentation: flags must be booleans")
+        if "recipe" in instance:
+            registered("deployment_recipe", instance["recipe"], f"{loc}.recipe")
         for field in ("frontend", "api"):
             if field in instance:
                 registered("service", instance[field], f"{loc}.{field}")
@@ -137,3 +139,64 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
                 issues.append(f"telemetry.{flag}: expected a boolean")
     if issues:
         raise ConfigValidationError(issues)
+
+
+def validate_adapter_capabilities(adapter, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Check an adapter contract and declared support without starting resources.
+
+    Capabilities contain lists named deployment, simulators, services and stages.
+    Optional lists are extensions, frontends, apis and instrumentation (enabled
+    observation keys). A recipes mapping assigns one recipe ID per supported
+    deployment mode. This verifies declarations, not software readiness.
+    """
+    from collections.abc import Mapping
+    from adapters.base_adapter import PlatformAdapter
+
+    if not isinstance(adapter, PlatformAdapter):
+        raise ConfigValidationError(["adapter: must implement PlatformAdapter"])
+    issues = []
+    if adapter.platform_id != cfg["platform"]:
+        issues.append("adapter: platform identity does not match configuration")
+    capabilities = adapter.capabilities()
+    if not isinstance(capabilities, Mapping):
+        raise ConfigValidationError(["adapter.capabilities: expected a mapping"])
+    capabilities = dict(capabilities)
+    for key in ("deployment", "simulators", "services", "stages", "extensions",
+                "frontends", "apis", "instrumentation"):
+        values = capabilities.get(key, [] if key in {
+            "extensions", "frontends", "apis", "instrumentation"
+        } else None)
+        if not isinstance(values, (list, tuple)) or any(
+            not isinstance(v, str) or not _IDENTIFIER.fullmatch(v) for v in values
+        ):
+            issues.append(f"adapter.capabilities.{key}: expected identifier list")
+            capabilities[key] = []
+        else:
+            capabilities[key] = list(values)
+    requests = {
+        "deployment": [cfg["deployment"]], "simulators": [cfg["simulation"]],
+        "services": list(cfg["services"]), "stages": cfg.get("stages", []),
+        "extensions": cfg.get("extensions", []),
+        "frontends": [cfg["frontend"]] if "frontend" in cfg else [],
+        "apis": [cfg["api"]] if "api" in cfg else [],
+        "instrumentation": [name for name, enabled in cfg.get("instrumentation", {}).items()
+                            if enabled is True or name == "plugin"],
+    }
+    for key, values in requests.items():
+        if any(value not in capabilities[key] for value in values):
+            issues.append(f"adapter.capabilities.{key}: requested capability unsupported")
+    recipes = capabilities.get("recipes")
+    if not isinstance(recipes, Mapping) or any(
+        mode not in ("managed", "attach") or not isinstance(recipe, str)
+        or not _IDENTIFIER.fullmatch(recipe) for mode, recipe in recipes.items()
+    ):
+        issues.append("adapter.capabilities.recipes: expected mode to recipe ID mapping")
+    elif cfg["deployment"] not in recipes:
+        issues.append("adapter.capabilities.recipes: no recipe for requested mode")
+    else:
+        capabilities["recipes"] = dict(recipes)
+        if "recipe" in cfg and cfg["recipe"] != recipes[cfg["deployment"]]:
+            issues.append("recipe: not supported for requested adapter mode")
+    if issues:
+        raise ConfigValidationError(issues)
+    return capabilities
