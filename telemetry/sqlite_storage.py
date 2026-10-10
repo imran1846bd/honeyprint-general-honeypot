@@ -96,6 +96,20 @@ class SQLiteStorage:
             except (sqlite3.Error, ValueError):
                 raise StorageError('Stored events could not be read') from None
 
+    def read_event(self, event_id: str) -> dict | None:
+        """Read one committed event by ID to verify durable acknowledgements."""
+        if not isinstance(event_id, str):
+            raise ValueError('Event ID must be a string')
+        with self._lock:
+            self._check_open()
+            try:
+                row = self._connection.execute(
+                    'SELECT payload FROM events WHERE event_id = ?', (event_id,),
+                ).fetchone()
+                return validate_event(json.loads(row[0])) if row else None
+            except (sqlite3.Error, ValueError):
+                raise StorageError('Stored event could not be read') from None
+
     def close(self) -> None:
         with self._lock:
             if not self._closed:
