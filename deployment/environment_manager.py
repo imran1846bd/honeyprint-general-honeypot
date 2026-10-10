@@ -96,6 +96,7 @@ class OctoPrintEnvironment:
                 'server': {'firstRun': False, 'onlineCheck': {'enabled': False},
                            'pluginBlocklist': {'enabled': False}, 'commands': {}},
                 'plugins': {
+                    '_disabled': ['discovery', 'softwareupdate'],
                     'virtual_printer': {'enabled': True, 'hasBed': profile['heated_bed'],
                                         'numExtruders': 1},
                     'honeyprint_audit': {'port': audit_port, 'token': audit_token,
