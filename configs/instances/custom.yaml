@@ -7,7 +7,12 @@ instances:
     simulation: lab_sim
     services:
       web_port: 8083
-    stages: []
+    stages:
+      - job_intake
+      - build_preparation
+      - build_execution
+      - post_processing
+      - inspection
 telemetry:
   backend: sqlite
   capture_requests: true
