@@ -2,7 +2,7 @@
 
 HoneyPrint is a proposed configuration-driven framework for additive manufacturing (AM) honeypot research. This README follows the design in *HoneyPrint Academic Framework: OctoPrint, Klipper and Custom* and maps it to the current repository structure.
 
-**Implementation status:** this repository contains the basic folder structure and placeholder Python/YAML files. The architecture, interfaces, examples and verification criteria below are design targets, not implemented capabilities. There is no working launch command, platform integration, telemetry backend or dashboard yet.
+**Implementation status:** configuration loading, registry lookup, configuration and capability checks, dependency planning, instance records and the validation CLI are implemented. The architecture below describes the target framework; lifecycle execution, platform integrations, simulation, telemetry storage and the dashboard remain future work.
 
 ## 1. Research objective and design boundaries
 
@@ -15,24 +15,9 @@ Configuration selects capabilities that have already been implemented. It cannot
 
 ## 2. Generalized reference architecture
 
-```mermaid
-flowchart TD
-    Config[Configuration and profiles] --> Core[Core: validate, resolve and plan]
-    Core --> Engines[Four logical engines]
-    Engines --> Workflow[Manufacturing workflow]
-    Engines --> Services[Exposed services]
-    Engines --> Physical[Simulated physical state]
-    Engines --> Security[Security and behavior]
-    Workflow --> Instance[Platform instance and registered adapter]
-    Services --> Instance
-    Physical --> Instance
-    Security --> Instance
-    Instance --> Bridge[Passive observation bridge]
-    Bridge --> Queue[Bounded asynchronous telemetry queue]
-    Queue --> Collector[Collector and event normalization]
-    Collector --> Storage[Persistent evidence storage]
-    Storage --> Dashboard[Read-only analysis dashboard]
-```
+![Generalized HoneyPrint reference architecture](docs/images/generalized-architecture.png)
+
+*Figure 1. Generalized HoneyPrint architecture reproduced from the academic framework document.*
 
 The four engines are logical responsibilities; they do not require four separate processes. Observation uses a separate, non-blocking telemetry pipeline.
 
@@ -261,7 +246,15 @@ git clone https://github.com/imran1846bd/honeyprint-general-honeypot.git
 cd honeyprint-general-honeypot
 ```
 
-The repository can currently be inspected as a project structure. `main.py` is a placeholder and does not launch services. Installation instructions and runtime requirements will be added alongside implementation.
+Install the YAML dependency and run the shared configuration checks:
+
+```bash
+python -m pip install -r requirements.txt
+python main.py validate configs/framework.yaml
+python -m unittest discover -s tests -v
+```
+
+The default configuration has no instances. The CLI uses an empty registry until implemented plugins are registered by application startup code. Planning and instance construction are currently Python APIs, and these checks do not launch platform services.
 
 ## Implementation sequence
 
