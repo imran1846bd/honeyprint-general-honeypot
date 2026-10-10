@@ -1,7 +1,7 @@
 """Runnable developer-owned example; a small custom HTTP printer simulation.
 
 This example is independent of OctoPrint and Klipper. It supports a deliberately
-limited command subset, no uploads and no physical device or shell execution.
+limited G-code subset, bounded data-only jobs and no physical device or shell execution.
 Developers replace this class with their installed platform implementation.
 """
 
@@ -9,18 +9,20 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import queue
-import re
 import threading
 
 from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
+from plugins.simulators.printer import PrinterSimulator
+from plugins.manufacturing.pipeline import STAGES, validate_stages, run_job
 
 
 @dataclass
 class LabHandle:
     server: object = field(repr=False)
     profile: dict = field(repr=False)
-    position: dict = field(default_factory=lambda: {'x': 0.0, 'y': 0.0, 'z': 0.0})
+    stages: tuple = ()
+    simulator: object = field(default=None, repr=False)
     lock: object = field(default_factory=threading.RLock, repr=False)
     events: object = field(default_factory=lambda: queue.Queue(maxsize=1024), repr=False)
     stopped: object = field(default_factory=threading.Event, repr=False)
@@ -30,6 +32,13 @@ class LabHandle:
     dropped: int = 0
     errors: int = 0
     owned_platform_resources: bool = True
+
+    def __post_init__(self):
+        self.simulator = PrinterSimulator(self.profile)
+
+    @property
+    def position(self):
+        return self.simulator.motion.position
 
     def emit(self, kind, action, outcome, metadata=None):
         try:
@@ -46,13 +55,14 @@ class LabAdapter(PlatformAdapter):
 
     def capabilities(self):
         return {'deployment': ['managed'], 'simulators': ['lab_sim'],
-                'services': ['web_port'], 'stages': [],
+                'services': ['web_port'], 'stages': list(STAGES),
                 'recipes': {'managed': 'lab_managed'}}
 
     def validate(self, cfg, context):
         if cfg['deployment'] != 'managed' or cfg['simulation'] != 'lab_sim':
             raise AdapterError('Custom example supports managed lab_sim only')
         load_profile(cfg['printer_profile'])
+        validate_stages(cfg.get('stages', ()))
 
     def prepare(self, plan):
         if self._handle and not self._handle.stopped.is_set():
@@ -78,52 +88,45 @@ class LabAdapter(PlatformAdapter):
                 if self.path == '/':
                     self.respond(200, '<!doctype html><html><title>Custom Printer Lab</title><h1>Custom Printer Lab</h1><p>Simulated printer API is available at /api/state.</p></html>', 'text/html; charset=utf-8')
                 elif self.path == '/api/state':
-                    with h.lock: self.respond(200, {'simulation': True, 'position': dict(h.position), 'temperature': 20.0})
+                    with h.lock: self.respond(200, h.simulator.snapshot())
                 else: self.respond(404, {'error': 'unknown endpoint'})
                 h.emit('http.request', 'GET', 'observed', {'route': 'state' if self.path == '/api/state' else 'other', 'status': status})
             def do_POST(self):
                 h = adapter._handle
                 status = 200
                 try:
-                    if self.path != '/api/command' or self.headers.get('Transfer-Encoding'):
+                    if self.path not in ('/api/command', '/api/job') or self.headers.get('Transfer-Encoding'):
                         raise ValueError()
                     length = int(self.headers.get('Content-Length', '0'))
-                    if not 1 <= length <= 4096: raise ValueError()
+                    limit = 1048576 if self.path == '/api/job' else 4096
+                    if not 1 <= length <= limit: raise ValueError()
                     data = json.loads(self.rfile.read(length))
-                    if not isinstance(data, dict) or set(data) != {'command'} or not isinstance(data['command'], str):
-                        raise ValueError()
-                    command = data['command'].strip().upper()
-                    if command == 'M105':
-                        response = {'response': 'ok T:20.0 /0.0 B:20.0 /0.0', 'simulation': True}
-                        code = 'M105'
-                    elif command == 'G28':
-                        with h.lock: h.position.update(x=0.0, y=0.0, z=0.0)
-                        response, code = {'response': 'ok', 'simulation': True}, 'G28'
+                    if not isinstance(data, dict): raise ValueError()
+                    if self.path == '/api/job':
+                        if set(data) != {'gcode'} or not isinstance(data['gcode'], str): raise ValueError()
+                        with h.lock:
+                            result, events = run_job(data['gcode'].encode('utf-8'), h.simulator, h.stages)
+                        for event in events:
+                            h.emit('manufacturing.stage', event['stage'], event['outcome'],
+                                   {'sha256': result['sha256'], 'size_bytes': result['size_bytes']})
+                        response = {'simulation': True, 'sha256': result['sha256'], 'stage': result['stage']}
+                        if 'inspection' in result: response['inspection'] = result['inspection']
+                        self.respond(200, response)
                     else:
-                        tokens = command.split()
-                        if not tokens or tokens[0] not in ('G0', 'G1') or len(tokens) == 1:
-                            raise ValueError()
-                        values = {}
-                        for token in tokens[1:]:
-                            if not re.fullmatch(r'[XYZ][+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)', token):
-                                raise ValueError()
-                            axis = token[0].lower()
-                            if axis in values: raise ValueError()
-                            value = float(token[1:])
-                            dimension = {'x': 'width', 'y': 'depth', 'z': 'height'}[axis]
-                            if not 0 <= value <= h.profile['volume'][dimension]: raise ValueError()
-                            values[axis] = value
-                        with h.lock: h.position.update(values)
-                        response, code = {'response': 'ok', 'simulation': True}, tokens[0]
-                    self.respond(200, response)
-                    h.emit('printer.command', 'execute', 'accepted', {'gcode': code})
+                        if set(data) != {'command'} or not isinstance(data['command'], str): raise ValueError()
+                        with h.lock:
+                            response = h.simulator.command(data['command'])
+                            h.simulator.step(1.0)
+                        self.respond(200, response)
+                        h.emit('printer.command', 'execute', 'accepted', {'gcode': response['gcode']})
+                    h.emit('printer.state', 'update', 'observed', {'powered': h.simulator.powered})
                 except (ValueError, TypeError, OSError, IndexError):
                     status = 400
                     self.respond(400, {'error': 'unsupported or invalid command'})
                     h.emit('printer.command', 'execute', 'rejected')
-                h.emit('http.request', 'POST', 'observed', {'route': 'command', 'status': status})
+                h.emit('http.request', 'POST', 'observed', {'route': 'job' if self.path == '/api/job' else 'command', 'status': status})
         server = HTTPServer(('127.0.0.1', plan['config']['services']['web_port']), Handler)
-        handle = LabHandle(server, self._profile)
+        handle = LabHandle(server, self._profile, stages=tuple(plan['config'].get('stages', ())))
         self._handle = handle
         handle.server_thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.1}, daemon=True)
         handle.server_thread.start()
