@@ -5,6 +5,8 @@ limited G-code subset, bounded data-only jobs and no physical device or shell ex
 Developers replace this class with their installed platform implementation.
 """
 
+from copy import deepcopy
+from pathlib import Path
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
@@ -13,6 +15,7 @@ import threading
 
 from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
+from telemetry.artifact_storage import ArtifactStorage
 from plugins.simulators.printer import PrinterSimulator
 from plugins.manufacturing.pipeline import STAGES, validate_stages, run_job
 
@@ -23,6 +26,7 @@ class LabHandle:
     profile: dict = field(repr=False)
     stages: tuple = ()
     simulator: object = field(default=None, repr=False)
+    artifacts: object = field(default=None, repr=False)
     lock: object = field(default_factory=threading.RLock, repr=False)
     events: object = field(default_factory=lambda: queue.Queue(maxsize=1024), repr=False)
     stopped: object = field(default_factory=threading.Event, repr=False)
@@ -51,7 +55,9 @@ class LabHandle:
 class LabAdapter(PlatformAdapter):
     platform_id = 'custom_lab'
 
-    def __init__(self): self._profile = self._handle = None
+    def __init__(self, *, runtime_dir=None):
+        self._profile = self._handle = self._artifacts = None
+        self._runtime_dir = Path(runtime_dir) if runtime_dir is not None else None
 
     def capabilities(self):
         return {'deployment': ['managed'], 'simulators': ['lab_sim'],
@@ -68,6 +74,9 @@ class LabAdapter(PlatformAdapter):
         if self._handle and not self._handle.stopped.is_set():
             raise AdapterError('Custom instance is already running')
         self._profile = load_profile(plan['config']['printer_profile'])
+        if plan['config'].get('stages'):
+            if self._runtime_dir is None: raise AdapterError('Manufacturing requires an artifact directory')
+            self._artifacts = ArtifactStorage(self._runtime_dir / 'artifacts' / plan['config']['id'])
 
     def launch_or_attach(self, plan):
         if self._profile is None: raise AdapterError('Custom instance is not prepared')
@@ -105,10 +114,14 @@ class LabAdapter(PlatformAdapter):
                     if self.path == '/api/job':
                         if set(data) != {'gcode'} or not isinstance(data['gcode'], str): raise ValueError()
                         with h.lock:
-                            result, events = run_job(data['gcode'].encode('utf-8'), h.simulator, h.stages)
+                            content = data['gcode'].encode('utf-8')
+                            candidate = deepcopy(h.simulator)
+                            result, events = run_job(content, candidate, h.stages)
+                            artifact = h.artifacts.store(content)
+                            h.simulator = candidate
                         for event in events:
                             h.emit('manufacturing.stage', event['stage'], event['outcome'],
-                                   {'sha256': result['sha256'], 'size_bytes': result['size_bytes']})
+                                   artifact)
                         response = {'simulation': True, 'sha256': result['sha256'], 'stage': result['stage']}
                         if 'inspection' in result: response['inspection'] = result['inspection']
                         self.respond(200, response)
@@ -126,7 +139,7 @@ class LabAdapter(PlatformAdapter):
                     h.emit('printer.command', 'execute', 'rejected')
                 h.emit('http.request', 'POST', 'observed', {'route': 'job' if self.path == '/api/job' else 'command', 'status': status})
         server = HTTPServer(('127.0.0.1', plan['config']['services']['web_port']), Handler)
-        handle = LabHandle(server, self._profile, stages=tuple(plan['config'].get('stages', ())))
+        handle = LabHandle(server, self._profile, stages=tuple(plan['config'].get('stages', ())), artifacts=self._artifacts)
         self._handle = handle
         handle.server_thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.1}, daemon=True)
         handle.server_thread.start()
