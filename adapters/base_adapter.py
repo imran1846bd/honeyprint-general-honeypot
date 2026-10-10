@@ -105,3 +105,12 @@ class PlatformAdapter(ABC):
         Repeated stop calls should be safe; failures must raise AdapterError.
         """
         raise NotImplementedError
+
+    def cleanup_prepared(self, plan: Mapping[str, Any]) -> None:
+        """Release owned preparation resources when no launch handle was returned.
+
+        Concrete adapters that prepare resources implement this hook. The default
+        refuses to claim cleanup because ownership cannot otherwise be verified.
+        Attach implementations must preserve all external resources.
+        """
+        raise AdapterError('Adapter does not implement preparation cleanup')
