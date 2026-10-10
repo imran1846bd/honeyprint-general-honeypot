@@ -139,6 +139,7 @@ class OctoPrintAdapter(PlatformAdapter):
             if managed:
                 # Refuse to launch on an occupied local service port.
                 with socket.socket() as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     probe.bind(('127.0.0.1', handle.port))
                 self._environment.launch(handle.port)
             deadline = time.monotonic() + self.startup_timeout
