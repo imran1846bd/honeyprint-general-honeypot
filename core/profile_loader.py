@@ -51,8 +51,11 @@ def octoprint_profile(profile: dict) -> dict:
     """Translate an already validated HoneyPrint profile to OctoPrint geometry."""
     return {
         'id': profile['id'], 'name': profile['name'], 'model': 'HoneyPrint virtual printer',
+        'color': 'default', 'heatedChamber': False,
+        'axes': {axis: {'speed': speed, 'inverted': False}
+                 for axis, speed in [('x', 6000), ('y', 6000), ('z', 200), ('e', 300)]},
         'volume': {**profile['volume'], 'formFactor': 'rectangular', 'origin': 'lowerleft'},
         'heatedBed': profile['heated_bed'],
         'extruder': {'count': 1, 'nozzleDiameter': profile['nozzle_diameter'],
-                     'sharedNozzle': False, 'offsets': [(0.0, 0.0)]},
+                     'sharedNozzle': False, 'defaultExtrusionLength': 5, 'offsets': [(0.0, 0.0)]},
     }
