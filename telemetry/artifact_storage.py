@@ -4,20 +4,35 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import threading
 
 
 class ArtifactStorage:
-    def __init__(self, root):
+    def __init__(self, root, *, max_bytes=104857600, max_artifacts=1000):
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 1073741824 or type(max_artifacts) is not int or not 1 <= max_artifacts <= 10000:
+            raise ValueError('Invalid artifact retention limits')
+        self.max_bytes, self.max_artifacts = max_bytes, max_artifacts
+        self._lock = threading.RLock()
         self.root = Path(root).absolute()
         if self.root.is_symlink(): raise ValueError('Artifact directory cannot be a symlink')
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         if not self.root.is_dir(): raise ValueError('Artifact root must be a directory')
 
     def store(self, content):
+        with self._lock:
+            return self._store(content)
+
+    def _store(self, content):
         if type(content) is not bytes or not 1 <= len(content) <= 1048576:
             raise ValueError('Artifact must contain at most one MiB of bytes')
         digest = hashlib.sha256(content).hexdigest()
         destination = self.root / (digest + '.gcode')
+        if destination.exists() or destination.is_symlink():
+            if self.read(digest) != content: raise ValueError('Artifact content conflict')
+            return {'sha256': digest, 'size_bytes': len(content), 'artifact': destination.name}
+        files = list(self.root.glob('*.gcode'))
+        if len(files) >= self.max_artifacts or sum(p.lstat().st_size for p in files) + len(content) > self.max_bytes:
+            raise ValueError('Artifact retention limit reached')
         fd, name = tempfile.mkstemp(prefix='.pending-', dir=self.root)
         try:
             with os.fdopen(fd, 'wb') as stream:
