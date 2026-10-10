@@ -36,7 +36,7 @@ def load_profile(path: str | Path) -> dict:
     if not isinstance(volume, dict) or set(volume) != {'width', 'depth', 'height'}:
         raise ProfileError('Volume requires width, depth and height')
     def number(value, maximum):
-        if type(value) not in (int, float) or not isfinite(value) or not 0 < value <= maximum:
+        if type(value) not in (int, float) or not 0 < value <= maximum or not isfinite(value):
             raise ProfileError('Profile dimensions must be finite positive supported values')
         return float(value)
     return {
@@ -54,7 +54,7 @@ def octoprint_profile(profile: dict) -> dict:
         'color': 'default', 'heatedChamber': False,
         'axes': {axis: {'speed': speed, 'inverted': False}
                  for axis, speed in [('x', 6000), ('y', 6000), ('z', 200), ('e', 300)]},
-        'volume': {**profile['volume'], 'formFactor': 'rectangular', 'origin': 'lowerleft'},
+        'volume': {**profile['volume'], 'formFactor': 'rectangular', 'origin': 'lowerleft', 'custom_box': False},
         'heatedBed': profile['heated_bed'],
         'extruder': {'count': 1, 'nozzleDiameter': profile['nozzle_diameter'],
                      'sharedNozzle': False, 'defaultExtrusionLength': 5, 'offsets': [(0.0, 0.0)]},
