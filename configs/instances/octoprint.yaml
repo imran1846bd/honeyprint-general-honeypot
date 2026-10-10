@@ -1,1 +1,22 @@
-# Structure placeholder; implementation pending.
+# Run with a separately installed pinned OctoPrint interpreter.
+# Printer profiles resolve relative to this configuration file.
+schema_version: 1
+instances:
+  - id: octo_01
+    platform: octoprint
+    deployment: managed
+    printer_profile: ../profiles/virtual_lab.yaml
+    simulation: virtual_printer
+    services:
+      web_port: 8081
+    stages: []
+    instrumentation:
+      plugin: honeyprint_audit
+      http: true
+      gcode: true
+      state: true
+telemetry:
+  backend: sqlite
+  capture_requests: true
+  capture_commands: true
+  capture_state_changes: true
