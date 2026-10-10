@@ -117,8 +117,7 @@ class LifecycleManager:
                 if self._handle is not None:
                     self._adapter.stop(self._handle, owned_only=True)
                 elif self._attempted:
-                    # No cleanup token exists in the current adapter contract.
-                    raise LifecycleError("Adapter-specific cleanup is required without a handle")
+                    self._adapter.cleanup_prepared(self._plan)
             except Exception:
                 self._fail("cleanup")
             self._handle = None
