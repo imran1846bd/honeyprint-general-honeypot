@@ -1,0 +1,33 @@
+"""Explicit registrations for the implemented OctoPrint prototype components."""
+
+from pathlib import Path
+
+from adapters.octoprint.adapter import OctoPrintAdapter
+from core.plugin_registry import PluginRegistry
+from recipes.octoprint import managed_recipe, attach_recipe, OCTOPRINT_VERSION
+from telemetry.sqlite_storage import SQLiteStorage
+
+
+def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None = None,
+                            attach_api_key_env: str | None = None) -> PluginRegistry:
+    """Register trusted factories without preparing or launching any runtime.
+
+    The simulator descriptor identifies OctoPrint's bundled Virtual Printer;
+    the adapter configures it and health-checks actual communication. Developer
+    startup code can register further adapters/providers on this same registry.
+    """
+    registry = PluginRegistry()
+    registry.register('platform_adapter', 'octoprint', lambda: OctoPrintAdapter(
+        runtime_dir=runtime_dir, python=octoprint_python,
+        attach_api_key_env=attach_api_key_env,
+    ))
+    registry.register('deployment_recipe', 'octoprint_managed', managed_recipe)
+    registry.register('deployment_recipe', 'octoprint_attach', attach_recipe)
+    registry.register('simulator', 'virtual_printer', lambda: {
+        'provider': 'octoprint.virtual_printer', 'version': OCTOPRINT_VERSION,
+    })
+    registry.register('storage', 'sqlite', SQLiteStorage)
+    registry.register('instrumentation', 'honeyprint_audit', lambda: {
+        'plugin_file': str(Path(__file__).resolve().parents[1] / 'adapters/octoprint/audit_plugin.py'),
+    })
+    return registry
