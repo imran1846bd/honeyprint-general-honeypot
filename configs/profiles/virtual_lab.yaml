@@ -1,0 +1,9 @@
+schema_version: 1
+id: virtual_lab
+name: HoneyPrint Virtual Lab
+volume:
+  width: 220
+  depth: 220
+  height: 250
+heated_bed: true
+nozzle_diameter: 0.4
