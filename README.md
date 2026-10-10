@@ -15,9 +15,41 @@ Configuration selects capabilities that have already been implemented. It cannot
 
 ## 2. Generalized reference architecture
 
-![Generalized HoneyPrint reference architecture](docs/images/generalized-architecture.png)
+```mermaid
+flowchart TB
+    config["User-defined YAML configuration<br/>Printer profile · Process stages · Platform · Sensors · Decoys"]
+    core["Honeypot Framework Core<br/>Load · Validate · Resolve dependencies · Registry · Build · Lifecycle"]
 
-*Figure 1. Generalized HoneyPrint architecture reproduced from the academic framework document.*
+    subgraph engines["Logical engines"]
+        manufacturing["Manufacturing Stage Engine<br/>Intake · Prepare · Build · Post-process · Inspect"]
+        platform["Service and Platform Engine<br/>Real software · APIs · Firmware integrations"]
+        simulation["Printer Simulation Engine<br/>Thermal · Motion · Power · Sensors"]
+        security["Behavior and Security Engine<br/>Authentication · Decoys · Event rules"]
+    end
+
+    instance["Configured honeypot instance<br/>Platform software + simulation + workflow + isolated state"]
+    telemetry["Central logging, telemetry and analysis<br/>Normalized events · Persistent storage · Dashboard · Analysis"]
+
+    config --> core
+    core --> manufacturing
+    core --> platform
+    core --> simulation
+    core --> security
+    manufacturing --> instance
+    platform --> instance
+    simulation --> instance
+    security --> instance
+    instance --> telemetry
+
+    classDef layer fill:#f6f8fa,stroke:#57606a,color:#24292f;
+    classDef engine fill:#ffffff,stroke:#57606a,color:#24292f;
+    class config,core,instance,telemetry layer;
+    class manufacturing,platform,simulation,security engine;
+```
+
+*Figure 1. Generalized HoneyPrint architecture using the academic document's component names and workflow.*
+
+[View the original academic diagram](docs/images/generalized-architecture.png)
 
 The four engines are logical responsibilities; they do not require four separate processes. Observation uses a separate, non-blocking telemetry pipeline.
 
