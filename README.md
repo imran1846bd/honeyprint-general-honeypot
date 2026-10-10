@@ -359,7 +359,18 @@ python main.py run configs/instances/custom.yaml --runtime-dir .honeyprint/custo
 python main.py stop --runtime-dir .honeyprint/custom-demo
 ```
 
-The example listens on loopback port 8083 and provides `GET /api/state` and `POST /api/command` with a JSON body such as `{"command":"G1 X10 Y20"}`. It accepts bounded absolute X/Y/Z moves, G28 and M105; other commands and moves outside the configured volume are rejected and captured. Its fixed temperature response and small command subset are an example of custom integration, not a complete firmware or physical simulator.
+The example listens on loopback port 8083 and provides `GET /api/state` and `POST /api/command` with a JSON body such as `{"command":"G1 X10 Y20"}`. It accepts a bounded G-code subset: G0/G1 (XYZ/E/F), G28, G90/G91, M82/M83, M104/M140, M105, M112 and G4. Motion advances at the configured feedrate, heaters follow a deterministic first-order response, and extrusion checks temperature and filament availability. Each accepted command advances one simulated second; G4 also advances its explicit virtual duration. These simplified models are not calibrated printer physics or a Klipper MCU backend.
+
+The default custom configuration enables all five manufacturing stages. Submit a data-only job through `POST /api/job`:
+
+```bash
+curl -H 'Content-Type: application/json' http://127.0.0.1:8083/api/job \
+  -d '{"gcode":"G28\nM104 S200\nG4 S90\nG1 X10 Y20 E5"}'
+```
+
+Intake bounds UTF-8 G-code and computes its SHA-256 identity; preparation preflights a detached printer state; execution applies the simulated commands; post-processing turns off heaters and cools; inspection reports process consistency. Stages must be an ordered prefix beginning with intake. Rejected jobs leave printer state unchanged. Inspection does not measure physical part quality. Each completed stage emits normalized evidence with artifact hash and size. Raw job content is not persisted by this example, and uploads cannot execute Python or shell code. JSON request bodies are bounded to one MiB; command requests are bounded to 4096 bytes.
+
+Sensor fault injection is currently a Python simulation API (`SensorModel.set_fault`), not an exposed network endpoint. Emergency stop disables motion and heaters; the simulated instance must be restarted to restore power.
 
 Installed developer code can use a startup manifest through `sdk.extensions.register_extension`:
 
@@ -406,7 +417,7 @@ Klipper/Moonraker/Mainsail integration is not enabled. This environment has a Do
 3. Implemented: pinned local OctoPrint recipe, Virtual Printer integration and audit bridge.
 4. Implemented: normalized telemetry, SQLite persistence and event readback.
 5. Implement Klipper integration only with a validated MCU simulation backend.
-6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. Manufacturing-stage plugins remain future work.
+6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. The custom example now runs ordered manufacturing-stage plugins and simplified motion, thermal, extrusion and sensor simulation. These plugins are not yet connected to OctoPrint or Klipper.
 7. Implemented for this prototype: contract tests and real OctoPrint attach, persistence, shutdown and restart checks. Extend coverage as further platforms are added.
 
 ## License and citation
