@@ -3,6 +3,8 @@
 from pathlib import Path
 
 from adapters.octoprint.adapter import OctoPrintAdapter
+from adapters.custom.lab_adapter import LabAdapter
+from sdk.extensions import register_extension
 from core.plugin_registry import PluginRegistry
 from recipes.octoprint import managed_recipe, attach_recipe, OCTOPRINT_VERSION
 from telemetry.sqlite_storage import SQLiteStorage
@@ -29,5 +31,18 @@ def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None 
     registry.register('storage', 'sqlite', SQLiteStorage)
     registry.register('instrumentation', 'honeyprint_audit', lambda: {
         'plugin_file': str(Path(__file__).resolve().parents[1] / 'adapters/octoprint/audit_plugin.py'),
+    })
+    register_extension(registry, {
+        'api_version': 1, 'name': 'custom_lab_example', 'plugins': [
+            {'kind': 'platform_adapter', 'id': 'custom_lab', 'factory': LabAdapter},
+            {'kind': 'simulator', 'id': 'lab_sim', 'factory': lambda: {
+                'provider': 'custom_lab', 'version': '0.1.0',
+            }},
+            {'kind': 'deployment_recipe', 'id': 'lab_managed', 'factory': lambda: {
+                'platform': 'custom_lab', 'deployment': 'managed',
+                'simulators': ['lab_sim'], 'versions': {'custom_lab': '0.1.0'},
+                'dependencies': [],
+            }},
+        ],
     })
     return registry
