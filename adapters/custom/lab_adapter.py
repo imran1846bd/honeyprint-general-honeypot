@@ -74,14 +74,16 @@ class LabAdapter(PlatformAdapter):
                 self.wfile.write(body)
             def do_GET(self):
                 h = adapter._handle
+                status = 200 if self.path in ('/', '/api/state') else 404
                 if self.path == '/':
                     self.respond(200, '<!doctype html><html><title>Custom Printer Lab</title><h1>Custom Printer Lab</h1><p>Simulated printer API is available at /api/state.</p></html>', 'text/html; charset=utf-8')
                 elif self.path == '/api/state':
                     with h.lock: self.respond(200, {'simulation': True, 'position': dict(h.position), 'temperature': 20.0})
                 else: self.respond(404, {'error': 'unknown endpoint'})
-                h.emit('http.request', 'GET', 'observed', {'route': 'state' if self.path == '/api/state' else 'other'})
+                h.emit('http.request', 'GET', 'observed', {'route': 'state' if self.path == '/api/state' else 'other', 'status': status})
             def do_POST(self):
                 h = adapter._handle
+                status = 200
                 try:
                     if self.path != '/api/command' or self.headers.get('Transfer-Encoding'):
                         raise ValueError()
@@ -116,9 +118,10 @@ class LabAdapter(PlatformAdapter):
                     self.respond(200, response)
                     h.emit('printer.command', 'execute', 'accepted', {'gcode': code})
                 except (ValueError, TypeError, OSError, IndexError):
+                    status = 400
                     self.respond(400, {'error': 'unsupported or invalid command'})
                     h.emit('printer.command', 'execute', 'rejected')
-                h.emit('http.request', 'POST', 'observed', {'route': 'command'})
+                h.emit('http.request', 'POST', 'observed', {'route': 'command', 'status': status})
         server = HTTPServer(('127.0.0.1', plan['config']['services']['web_port']), Handler)
         handle = LabHandle(server, self._profile)
         self._handle = handle
@@ -159,8 +162,11 @@ class LabAdapter(PlatformAdapter):
         self._check(handle)
         if owned_only is not True: raise AdapterError('External resource control is unsupported')
         if handle.stopped.is_set(): return
-        handle.server.shutdown(); handle.server.server_close()
-        handle.server_thread.join(timeout=3)
+        if handle.server_thread and handle.server_thread.is_alive():
+            handle.server.shutdown()
+        handle.server.server_close()
+        if handle.server_thread and handle.server_thread.ident is not None:
+            handle.server_thread.join(timeout=3)
         handle.stopped.set()
         if handle.observer_thread:
             handle.observer_thread.join(timeout=3)
