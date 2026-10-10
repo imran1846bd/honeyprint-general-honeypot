@@ -35,7 +35,7 @@ def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None 
     })
     register_extension(registry, {
         'api_version': 1, 'name': 'custom_lab_example', 'plugins': [
-            {'kind': 'platform_adapter', 'id': 'custom_lab', 'factory': LabAdapter},
+            {'kind': 'platform_adapter', 'id': 'custom_lab', 'factory': lambda: LabAdapter(runtime_dir=runtime_dir)},
             {'kind': 'simulator', 'id': 'lab_sim', 'factory': lambda: {
                 'provider': 'custom_lab', 'version': '0.1.0',
             }},
