@@ -8,6 +8,7 @@ from sdk.extensions import register_extension
 from core.plugin_registry import PluginRegistry
 from recipes.octoprint import managed_recipe, attach_recipe, OCTOPRINT_VERSION
 from telemetry.sqlite_storage import SQLiteStorage
+from plugins.manufacturing.pipeline import FACTORIES
 
 
 def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None = None,
@@ -45,4 +46,6 @@ def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None 
             }},
         ],
     })
+    for stage, factory in FACTORIES.items():
+        registry.register('manufacturing_stage', stage, factory)
     return registry
