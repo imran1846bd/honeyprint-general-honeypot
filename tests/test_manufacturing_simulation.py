@@ -17,6 +17,7 @@ from plugins.simulators.printer import PrinterSimulator
 from plugins.manufacturing.pipeline import STAGES, run_job
 from plugins.manufacturing.job_intake import job_intake
 from telemetry.analysis.evidence import EvidenceReader
+from telemetry.artifact_storage import ArtifactStorage
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = {'volume': {'width': 220, 'depth': 220, 'height': 250}, 'heated_bed': True}
@@ -110,7 +111,10 @@ class SimulationTests(unittest.TestCase):
                 request = urllib.request.Request(f'http://127.0.0.1:{port}/api/job',
                                                  data=json.dumps({'gcode': JOB.decode()}).encode())
                 with urllib.request.urlopen(request, timeout=5) as response:
-                    self.assertTrue(json.load(response)['inspection']['passed'])
+                    result = json.load(response)
+                    self.assertTrue(result['inspection']['passed'])
+                    artifacts = ArtifactStorage(root/'artifacts'/'custom_01')
+                    self.assertEqual(artifacts.read(result['sha256']), JOB)
                 before = deepcopy(instance.resources['platform_handle'].simulator.snapshot())
                 request = urllib.request.Request(f'http://127.0.0.1:{port}/api/job',
                                                  data=json.dumps({'gcode': 'G1 X999'}).encode())
