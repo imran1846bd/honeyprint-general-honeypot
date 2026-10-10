@@ -2,7 +2,7 @@
 
 HoneyPrint is a proposed configuration-driven framework for additive manufacturing (AM) honeypot research. This README follows the design in *HoneyPrint Academic Framework: OctoPrint, Klipper and Custom* and maps it to the current repository structure.
 
-**Implementation status:** configuration loading, registry lookup, configuration and capability checks, dependency planning, instance records and the validation CLI are implemented. The architecture below describes the target framework; lifecycle execution, platform integrations, simulation, telemetry storage and the dashboard remain future work.
+**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. Klipper, manufacturing-stage plugins, custom adapter examples, threat classification, alerts and the dashboard remain future work. The architecture below remains the full target framework.
 
 ## 1. Research objective and design boundaries
 
@@ -68,7 +68,7 @@ These are manufacturing lifecycle stages, not technical architecture layers. A d
 
 ## 3. Common configuration and build procedure
 
-All YAML examples are illustrative. Referenced profiles, providers, plugins and deployment recipes have not yet been implemented. Profile paths below use the current repository layout.
+The examples in the design sections illustrate the full target framework. For the implemented prototype, use `configs/instances/octoprint.yaml` and `configs/profiles/virtual_lab.yaml`; its stage list is empty because manufacturing-stage plugins are not implemented. Profile paths resolve relative to the selected configuration file.
 
 ```yaml
 schema_version: 1
@@ -209,7 +209,7 @@ Planned deployment boundaries include isolated networks, explicitly approved exp
 
 ## 9. Repository layout
 
-The academic document suggests logical directories such as `simulators/`, `manufacturing/` and `recipes/`. In the current repository, these map to `plugins/simulators/`, `plugins/manufacturing/` and `deployment/recipes/`. The Klipper and custom adapter directories are named `klipper_moonraker/` and `custom/` respectively; configuration platform IDs remain `klipper` and `custom_lab`.
+The academic document suggests logical directories such as `simulators/`, `manufacturing/` and `recipes/`. In the current repository, these map to `plugins/simulators/`, `plugins/manufacturing/` and the implemented `recipes/` directory. The earlier `deployment/recipes/` directory remains reserved. The Klipper and custom adapter directories are named `klipper_moonraker/` and `custom/` respectively; configuration platform IDs remain `klipper` and `custom_lab`.
 
 ```text
 honeyprint-general-honeypot/
@@ -217,6 +217,8 @@ honeyprint-general-honeypot/
 │   ├── custom/
 │   ├── klipper_moonraker/
 │   ├── octoprint/
+│   │   ├── adapter.py
+│   │   └── audit_plugin.py
 │   └── base_adapter.py
 ├── configs/
 │   ├── instances/
@@ -225,19 +227,24 @@ honeyprint-general-honeypot/
 │   │   └── octoprint.yaml
 │   ├── profiles/
 │   │   ├── manufacturing/
-│   │   └── printers/
+│   │   ├── printers/
+│   │   └── virtual_lab.yaml
 │   └── framework.yaml
 ├── core/
+│   ├── builtin_registry.py
 │   ├── config_loader.py
 │   ├── dependency_resolver.py
 │   ├── event_bus.py
 │   ├── instance_builder.py
 │   ├── lifecycle_manager.py
 │   ├── plugin_registry.py
+│   ├── profile_loader.py
+│   ├── runtime.py
 │   ├── state_manager.py
 │   └── validator.py
 ├── dashboard/
 ├── deployment/
+│   ├── control.py
 │   ├── docker/
 │   ├── recipes/
 │   └── environment_manager.py
@@ -258,15 +265,24 @@ honeyprint-general-honeypot/
 │       ├── motion.py
 │       ├── sensors.py
 │       └── thermal.py
+├── recipes/
+│   └── octoprint.py
 ├── sdk/
 ├── telemetry/
 │   ├── analysis/
 │   ├── storage/
 │   ├── collector.py
-│   └── normalizer.py
+│   ├── normalizer.py
+│   └── sqlite_storage.py
 ├── tests/
+│   ├── test_lifecycle.py
+│   ├── test_octoprint_integration.py
+│   ├── test_planning.py
+│   └── test_telemetry.py
 ├── .gitignore
 ├── README.md
+├── requirements.txt
+├── requirements-octoprint.txt
 └── main.py
 ```
 
@@ -287,17 +303,55 @@ python main.py validate configs/framework.yaml
 python -m unittest discover -s tests -v
 ```
 
-The default configuration has no instances. The CLI uses an empty registry until implemented plugins are registered by application startup code. Planning and instance construction are currently Python APIs, and these checks do not launch platform services.
+The default configuration has no instances. Built-in registrations are explicit Python factories; custom startup code can pass its own populated registry to `main()`. YAML cannot import or execute uploaded code.
+
+### Run the local OctoPrint prototype
+
+Use Python 3.10–3.13 on macOS or Linux. The verified runtime uses Python 3.13 and OctoPrint 1.11.8. Install OctoPrint into a separate environment; framework preparation checks its version and does not run pip automatically.
+
+```bash
+python3 -m venv .venv-octoprint
+.venv-octoprint/bin/python -m pip install -r requirements-octoprint.txt
+python main.py plan configs/instances/octoprint.yaml --octoprint-python .venv-octoprint/bin/python
+python main.py run configs/instances/octoprint.yaml --octoprint-python .venv-octoprint/bin/python
+```
+
+The managed Web UI listens at `http://127.0.0.1:8081`. Research login credentials are generated in `.honeyprint/octo_01/credentials.json`, with private file permissions. Keep that runtime directory outside version control. Runtime data includes the owned OctoPrint configuration, its logs, and `.honeyprint/events.sqlite3`.
+
+Stop from another terminal, or press Ctrl-C in the running terminal:
+
+```bash
+python main.py stop
+```
+
+The stop command acknowledges a shutdown request; the running process confirms final cleanup and telemetry drain. For a bounded smoke run, append `--duration 5`. For a separate runtime directory, pass the same `--runtime-dir` to run and stop. An exclusive instance lock prevents concurrent ownership of one basedir.
+
+Readiness requires the pinned server version, the selected VIRTUAL connection and profile, a temperature response, a live audit observer with no reported drops/errors, and lifecycle evidence read back from SQLite. It does not establish physical printer fidelity. This prototype stays on loopback; public network exposure and container/device isolation remain separate deployment work.
+
+The integration uses OctoPrint's documented [Virtual Printer](https://docs.octoprint.org/en/main/development/virtual_printer.html), [connection API](https://docs.octoprint.org/en/main/api/connection.html) and [plugin hooks](https://docs.octoprint.org/en/main/plugins/hooks.html). Audit hooks enqueue minimal records; a worker sends them over an authenticated local UDP channel. Raw command arguments, request bodies, headers and event payloads are omitted. UDP is best-effort; counters expose observed loss, but do not establish lossless capture. Common credential metadata keys are redacted; producers must handle secrets embedded in free text.
+
+### Read-only attachment
+
+Attachment requires an already operational OctoPrint 1.11.8 server on loopback with its Virtual Printer connected and the matching profile selected. Copy the managed example, change deployment to `attach`, and replace instrumentation with `state: true`. Supply an existing user API key through an environment variable and pass `--attach-api-key-env VARIABLE_NAME`. The framework polls state, never installs plugins or reconnects the external printer, and stop only detaches its observer. HTTP and G-code audit flags are rejected in attach mode because that coverage is not implemented.
+
+### Verify persistence and integration
+
+```bash
+python -m unittest discover -s tests -v
+HONEYPRINT_OCTOPRINT_PYTHON="$PWD/.venv-octoprint/bin/python" python -m unittest discover -s tests -v
+```
+
+The default suite skips the real-server test when the optional interpreter is absent. With it enabled, the test launches a real server, observes commands, reads SQLite events, confirms that attach preserves the external process/configuration, requests graceful stop and restarts the owned server. Collector failures retain the pending batch for retry; pending queue records are in memory and must drain before shutdown.
 
 ## Implementation sequence
 
-1. Define schemas, extension contracts, registry and capability validation.
-2. Implement dependency planning, resource ownership, lifecycle and health reporting.
-3. Add a version-pinned OctoPrint recipe, virtual printer integration and audit bridge.
-4. Add normalized telemetry, SQLite persistence and event read-back verification.
+1. Implemented: schemas, extension contracts, registry and capability validation.
+2. Implemented: dependency planning, resource ownership, lifecycle and health reporting.
+3. Implemented: pinned local OctoPrint recipe, Virtual Printer integration and audit bridge.
+4. Implemented: normalized telemetry, SQLite persistence and event readback.
 5. Implement Klipper integration only with a validated MCU simulation backend.
 6. Add custom adapter examples, manufacturing plugins and read-only analysis.
-7. Verify adapter contracts, integration behavior and per-instance isolation with tests.
+7. Implemented for this prototype: contract tests and real OctoPrint attach, persistence, shutdown and restart checks. Extend coverage as further platforms are added.
 
 ## License and citation
 
