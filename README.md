@@ -2,7 +2,7 @@
 
 HoneyPrint is a proposed configuration-driven framework for additive manufacturing (AM) honeypot research. This README follows the design in *HoneyPrint Academic Framework: OctoPrint, Klipper and Custom* and maps it to the current repository structure.
 
-**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. Klipper, manufacturing-stage plugins, custom adapter examples, threat classification, alerts and the dashboard remain future work. The architecture below remains the full target framework.
+**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Klipper and manufacturing-stage plugins remain future work; a validated MCU simulation backend is required before Klipper can be declared supported. The architecture below remains the full target framework.
 
 ## 1. Research objective and design boundaries
 
@@ -215,6 +215,7 @@ The academic document suggests logical directories such as `simulators/`, `manuf
 honeyprint-general-honeypot/
 ├── adapters/
 │   ├── custom/
+│   │   └── lab_adapter.py
 │   ├── klipper_moonraker/
 │   ├── octoprint/
 │   │   ├── adapter.py
@@ -243,6 +244,7 @@ honeyprint-general-honeypot/
 │   ├── state_manager.py
 │   └── validator.py
 ├── dashboard/
+│   └── server.py
 ├── deployment/
 │   ├── control.py
 │   ├── docker/
@@ -268,16 +270,23 @@ honeyprint-general-honeypot/
 ├── recipes/
 │   └── octoprint.py
 ├── sdk/
+│   └── extensions.py
 ├── telemetry/
 │   ├── analysis/
+│   │   ├── alerts.py
+│   │   ├── evidence.py
+│   │   ├── rules.py
+│   │   └── service.py
 │   ├── storage/
 │   ├── collector.py
 │   ├── normalizer.py
 │   └── sqlite_storage.py
 ├── tests/
+│   ├── test_extensions_and_analysis.py
 │   ├── test_lifecycle.py
 │   ├── test_octoprint_integration.py
 │   ├── test_planning.py
+│   ├── test_profiles.py
 │   └── test_telemetry.py
 ├── .gitignore
 ├── README.md
@@ -343,6 +352,53 @@ HONEYPRINT_OCTOPRINT_PYTHON="$PWD/.venv-octoprint/bin/python" python -m unittest
 
 The default suite skips the real-server test when the optional interpreter is absent. With it enabled, the test launches a real server, observes commands, reads SQLite events, confirms that attach preserves the external process/configuration, requests graceful stop and restarts the owned server. Collector failures retain the pending batch for retry; pending queue records are in memory and must drain before shutdown.
 
+### Run and extend the custom example
+
+```bash
+python main.py run configs/instances/custom.yaml --runtime-dir .honeyprint/custom-demo
+python main.py stop --runtime-dir .honeyprint/custom-demo
+```
+
+The example listens on loopback port 8083 and provides `GET /api/state` and `POST /api/command` with a JSON body such as `{"command":"G1 X10 Y20"}`. It accepts bounded absolute X/Y/Z moves, G28 and M105; other commands and moves outside the configured volume are rejected and captured. Its fixed temperature response and small command subset are an example of custom integration, not a complete firmware or physical simulator.
+
+Installed developer code can use a startup manifest through `sdk.extensions.register_extension`:
+
+```python
+from core.plugin_registry import PluginRegistry
+from sdk.extensions import register_extension
+from main import main
+
+registry = PluginRegistry()
+register_extension(registry, {
+    "api_version": 1,
+    "name": "my_extension",
+    "plugins": [
+        {"kind": "platform_adapter", "id": "my_platform", "factory": MyAdapter},
+        # Also register the implemented simulator, recipe and storage factories.
+    ],
+})
+main(registry=registry)
+```
+
+`MyAdapter` must be imported by your trusted startup code and implement the platform contract. The manifest preflights version, identifiers and collisions before registration. Factories are not executed during registration. There is no automatic code upload/import endpoint or sandbox for arbitrary Python packages.
+
+### Explore evidence and local rule alerts
+
+After a runtime has created its evidence database:
+
+```bash
+python -m telemetry.analysis.service --database .honeyprint/events.sqlite3 --alerts .honeyprint/analysis.sqlite3
+python -m dashboard.server --database .honeyprint/events.sqlite3 --alerts .honeyprint/analysis.sqlite3
+```
+
+The dashboard listens at `http://127.0.0.1:8090`, supports instance/type filters and bounded pagination, and exposes `GET /api/events` and `GET /api/alerts`. It opens databases read-only, escapes captured text and rejects POST writes. Derived findings are stored in a separate database, leaving raw evidence unchanged.
+
+For ongoing local notifications, run the analysis command with `--watch` alongside the framework. Findings cover denied API access, unknown endpoints, emergency-stop commands, rejected commands and platform interruptions. They are contextual indicators, not confirmed attacks. Checkpoints and deterministic finding IDs prevent duplicate results on restart. No email, messaging service or ML classifier is configured.
+
+### Klipper deployment requirement
+
+Klipper/Moonraker/Mainsail integration is not enabled. This environment has a Docker CLI but no reachable daemon or installed Docker app, and no external Klipper runtime has been supplied. A Linux runtime with a validated MCU simulation backend, pinned platform dependencies, coherent command/temperature responses and end-to-end captured evidence is required before a Klipper recipe can be registered as supported. See the official [Klipper installation guide](https://www.klipper3d.org/Installation.html) and [MCU protocol documentation](https://www.klipper3d.org/MCU_Commands.html). A YAML simulation flag alone cannot establish these conditions.
+
 ## Implementation sequence
 
 1. Implemented: schemas, extension contracts, registry and capability validation.
@@ -350,7 +406,7 @@ The default suite skips the real-server test when the optional interpreter is ab
 3. Implemented: pinned local OctoPrint recipe, Virtual Printer integration and audit bridge.
 4. Implemented: normalized telemetry, SQLite persistence and event readback.
 5. Implement Klipper integration only with a validated MCU simulation backend.
-6. Add custom adapter examples, manufacturing plugins and read-only analysis.
+6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. Manufacturing-stage plugins remain future work.
 7. Implemented for this prototype: contract tests and real OctoPrint attach, persistence, shutdown and restart checks. Extend coverage as further platforms are added.
 
 ## License and citation
