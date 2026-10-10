@@ -112,6 +112,9 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
     def request_hooks(self, *args, **kwargs):
         return [self.after_request]
 
+    def is_api_protected(self):
+        return True
+
     def is_api_adminonly(self):
         return True
 
