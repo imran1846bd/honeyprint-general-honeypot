@@ -38,5 +38,6 @@ class MotionModel:
         delta = {axis: self.target[axis] - value for axis, value in self.position.items()}
         distance = math.sqrt(sum(value * value for value in delta.values()))
         fraction = min(1.0, self.speed * seconds / distance) if distance else 1.0
-        self.position = {axis: value + delta[axis] * fraction for axis, value in self.position.items()}
+        self.position = dict(self.target) if fraction == 1.0 else {
+            axis: value + delta[axis] * fraction for axis, value in self.position.items()}
         return dict(self.position)
