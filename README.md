@@ -368,7 +368,7 @@ curl -H 'Content-Type: application/json' http://127.0.0.1:8083/api/job \
   -d '{"gcode":"G28\nM104 S200\nG4 S90\nG1 X10 Y20 E5"}'
 ```
 
-Intake bounds UTF-8 G-code and computes its SHA-256 identity; preparation preflights a detached printer state; execution applies the simulated commands; post-processing turns off heaters and cools; inspection reports process consistency. Stages must be an ordered prefix beginning with intake. Rejected jobs leave printer state unchanged. Inspection does not measure physical part quality. Each completed stage emits normalized evidence with artifact hash and size. Raw job content is not persisted by this example, and uploads cannot execute Python or shell code. JSON request bodies are bounded to one MiB; command requests are bounded to 4096 bytes.
+Intake bounds UTF-8 G-code and computes its SHA-256 identity; preparation preflights a detached printer state; execution applies the simulated commands; post-processing turns off heaters and cools; inspection reports process consistency. Stages must be an ordered prefix beginning with intake. Rejected jobs leave printer state unchanged. Inspection does not measure physical part quality. Each completed stage emits normalized evidence with artifact hash and size. Accepted raw G-code is preserved as a private SHA-256-named artifact under `<runtime-dir>/artifacts/<instance-id>/`; uploads cannot execute Python or shell code. Default retention bounds are 100 MiB and 1000 artifacts per instance, with duplicate content reusing its existing file. Integrity checks detect changed content, and reaching a quota rejects new jobs without applying simulated state. Rejected job content is not retained. JSON request bodies are bounded to one MiB; command requests are bounded to 4096 bytes.
 
 Sensor fault injection is currently a Python simulation API (`SensorModel.set_fault`), not an exposed network endpoint. Emergency stop disables motion and heaters; the simulated instance must be restarted to restore power.
 
@@ -405,6 +405,12 @@ python -m dashboard.server --database .honeyprint/events.sqlite3 --alerts .honey
 The dashboard listens at `http://127.0.0.1:8090`, supports instance/type filters and bounded pagination, and exposes `GET /api/events` and `GET /api/alerts`. It opens databases read-only, escapes captured text and rejects POST writes. Derived findings are stored in a separate database, leaving raw evidence unchanged.
 
 For ongoing local notifications, run the analysis command with `--watch` alongside the framework. Findings cover denied API access, unknown endpoints, emergency-stop commands, rejected commands and platform interruptions. They are contextual indicators, not confirmed attacks. Checkpoints and deterministic finding IDs prevent duplicate results on restart. No email, messaging service or ML classifier is configured.
+
+### Moonraker read-only transport
+
+`adapters.klipper.moonraker_client.MoonrakerClient` can inspect an existing loopback Moonraker port or a user-managed SSH tunnel. It uses bounded GET requests for server, printer and selected object status, optionally checking explicit Klipper/Moonraker version strings and reading an API key from an environment variable. It sends no printer commands and omits server paths and credentials from returned evidence. Its tests use an HTTP protocol fixture; real Klipper integration remains unverified. This helper is not registered as a runnable Klipper adapter and does not establish MCU simulation.
+
+The transport follows Moonraker's official [HTTP API introduction](https://moonraker.readthedocs.io/en/latest/external_api/introduction/) and [printer administration API](https://moonraker.readthedocs.io/en/latest/external_api/printer/).
 
 ### Klipper deployment requirement
 
