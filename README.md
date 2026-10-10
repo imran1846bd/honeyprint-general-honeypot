@@ -2,7 +2,7 @@
 
 HoneyPrint is a proposed configuration-driven framework for additive manufacturing (AM) honeypot research. This README follows the design in *HoneyPrint Academic Framework: OctoPrint, Klipper and Custom* and maps it to the current repository structure.
 
-**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Klipper and manufacturing-stage plugins remain future work; a validated MCU simulation backend is required before Klipper can be declared supported. The architecture below remains the full target framework.
+**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Five manufacturing stages, simplified physical models and private G-code artifact retention are implemented for the custom example. Klipper deployment remains future work; a validated MCU simulation backend is required before Klipper can be declared supported. The architecture below remains the full target framework.
 
 ## 1. Research objective and design boundaries
 
@@ -68,7 +68,7 @@ These are manufacturing lifecycle stages, not technical architecture layers. A d
 
 ## 3. Common configuration and build procedure
 
-The examples in the design sections illustrate the full target framework. For the implemented prototype, use `configs/instances/octoprint.yaml` and `configs/profiles/virtual_lab.yaml`; its stage list is empty because manufacturing-stage plugins are not implemented. Profile paths resolve relative to the selected configuration file.
+The examples in the design sections illustrate the full target framework. For the implemented prototype, use `configs/instances/octoprint.yaml` and `configs/profiles/virtual_lab.yaml`; its stage list is empty because OctoPrint is not yet connected to the custom simulation pipeline. The custom instance enables the implemented five-stage sequence. Profile paths resolve relative to the selected configuration file.
 
 ```yaml
 schema_version: 1
@@ -209,13 +209,15 @@ Planned deployment boundaries include isolated networks, explicitly approved exp
 
 ## 9. Repository layout
 
-The academic document suggests logical directories such as `simulators/`, `manufacturing/` and `recipes/`. In the current repository, these map to `plugins/simulators/`, `plugins/manufacturing/` and the implemented `recipes/` directory. The earlier `deployment/recipes/` directory remains reserved. The Klipper and custom adapter directories are named `klipper_moonraker/` and `custom/` respectively; configuration platform IDs remain `klipper` and `custom_lab`.
+The academic document suggests logical directories such as `simulators/`, `manufacturing/` and `recipes/`. In the current repository, these map to `plugins/simulators/`, `plugins/manufacturing/` and the implemented `recipes/` directory. The earlier `deployment/recipes/` directory remains reserved. The read-only Moonraker client is under `adapters/klipper/`, while `klipper_moonraker/` remains reserved and the custom adapter is under `custom/`; configuration platform IDs remain `klipper` and `custom_lab`.
 
 ```text
 honeyprint-general-honeypot/
 ├── adapters/
 │   ├── custom/
 │   │   └── lab_adapter.py
+│   ├── klipper/
+│   │   └── moonraker_client.py
 │   ├── klipper_moonraker/
 │   ├── octoprint/
 │   │   ├── adapter.py
@@ -259,12 +261,14 @@ honeyprint-general-honeypot/
 │   │   ├── build_preparation.py
 │   │   ├── inspection.py
 │   │   ├── job_intake.py
+│   │   ├── pipeline.py
 │   │   └── post_processing.py
 │   ├── security/
 │   ├── services/
 │   └── simulators/
 │       ├── extrusion.py
 │       ├── motion.py
+│       ├── printer.py
 │       ├── sensors.py
 │       └── thermal.py
 ├── recipes/
@@ -278,10 +282,14 @@ honeyprint-general-honeypot/
 │   │   ├── rules.py
 │   │   └── service.py
 │   ├── storage/
+│   ├── artifact_storage.py
 │   ├── collector.py
 │   ├── normalizer.py
 │   └── sqlite_storage.py
 ├── tests/
+│   ├── test_artifact_storage.py
+│   ├── test_manufacturing_simulation.py
+│   ├── test_moonraker_client.py
 │   ├── test_extensions_and_analysis.py
 │   ├── test_lifecycle.py
 │   ├── test_octoprint_integration.py
