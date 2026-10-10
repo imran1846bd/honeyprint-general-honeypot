@@ -1,1 +1,15 @@
-# Structure placeholder; implementation pending.
+schema_version: 1
+instances:
+  - id: custom_01
+    platform: custom_lab
+    deployment: managed
+    printer_profile: ../profiles/virtual_lab.yaml
+    simulation: lab_sim
+    services:
+      web_port: 8083
+    stages: []
+telemetry:
+  backend: sqlite
+  capture_requests: true
+  capture_commands: true
+  capture_state_changes: true
