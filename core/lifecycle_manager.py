@@ -88,6 +88,10 @@ class LifecycleManager:
                 if self._handle is None:
                     raise LifecycleError("Adapter did not return an instance handle")
                 self.instance.resources["platform_handle"] = self._handle
+                owns = getattr(self._handle, "owned_platform_resources", False) is True
+                if owns and self.instance.deployment == "attach":
+                    raise LifecycleError("Attach handles cannot claim platform ownership")
+                self.instance.resources["owned_platform_resources"] = owns
                 self._adapter.observe(self._handle, self._sink)
             except Exception:
                 self._fail("startup")
