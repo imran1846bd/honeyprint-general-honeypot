@@ -19,7 +19,7 @@ from plugins.manufacturing.pipeline import FACTORIES
 
 def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None = None,
                             attach_api_key_env: str | None = None, custom_code: Path | None = None,
-                            custom_python: Path | None = None, custom_health_path: str = '/') -> PluginRegistry:
+                            custom_python: Path | None = None, custom_health_path: str = '/', custom_api_url: str | None = None) -> PluginRegistry:
     """Register trusted factories without preparing or launching any runtime.
 
     The simulator descriptor identifies OctoPrint's bundled Virtual Printer;
@@ -27,6 +27,17 @@ def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None 
     startup code can register further adapters/providers on this same registry.
     """
     registry = PluginRegistry()
+    if custom_code is not None and custom_api_url:
+        raise ValueError('Choose custom code or a custom API, not both')
+    if custom_api_url:
+        from adapters.custom.api_adapter import CustomAPIAdapter, parse_api_url
+        parse_api_url(custom_api_url)
+        registry.register('platform_adapter', 'custom', lambda: CustomAPIAdapter(
+            api_url=custom_api_url, health_path=custom_health_path, runtime_dir=runtime_dir))
+        registry.register('simulator', 'custom_api', lambda: {'provider': 'external_http', 'version': '1'})
+        registry.register('deployment_recipe', 'custom_api_attach', lambda: {
+            'platform': 'custom', 'deployment': 'attach', 'simulators': ['custom_api'],
+            'versions': {'http_bridge': '1'}, 'dependencies': []})
     if custom_code is not None:
         code = Path(custom_code).absolute()
         if not code.is_file() or code.stat().st_size > 10485760:
