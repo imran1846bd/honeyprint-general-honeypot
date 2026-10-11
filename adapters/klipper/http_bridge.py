@@ -44,10 +44,10 @@ def create_bridge(environment, port, emit):
                             'r=urllib.request.Request(' + repr('http://127.0.0.1:7125' + self.path)
                             + ',data=' + repr(body) + ',headers={"Content-Type":"application/json"},method='
                             + repr(self.command) + '); '
-                            's=urllib.request.urlopen(r,timeout=5); '
+                            's=urllib.request.urlopen(r,timeout=30); '
                             'print(json.dumps({"status":s.status,"body":s.read(1048577).decode()}))')
                     result = json.loads(docker('exec', environment.name,
-                                              '/opt/moonraker-env/bin/python', '-c', code, timeout=8))
+                                              '/opt/moonraker-env/bin/python', '-c', code, timeout=35))
                     if len(result['body']) > 1048576:
                         raise ValueError()
                     status, output = result['status'], json.loads(result['body'])
