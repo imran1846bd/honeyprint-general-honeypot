@@ -25,10 +25,18 @@ class LocalSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); source = self.source(root)
             (source / 'out').mkdir(); (source / 'out/cache').write_text('ignored')
+            for name in ('venv', '.push-work'):
+                (source / name).mkdir()
+                (source / name / 'external').symlink_to('/etc/hosts')
+            (source / '.DS_Store').write_bytes(b'local metadata')
+            (source / 'activity.sqlite3').write_bytes(b'private events')
             with patch('deployment.local_sources.CACHE', root / 'cache'):
                 copy, first = snapshot(source, 'klipper')
                 self.assertEqual((copy / 'Makefile').read_text(), '# original\n')
                 self.assertFalse((copy / 'out').exists())
+                for name in ('venv', '.push-work', '.DS_Store', 'activity.sqlite3'):
+                    self.assertFalse((copy / name).exists())
+                (source / 'activity.sqlite3').write_bytes(b'new private events')
                 (source / 'out/cache').write_text('different')
                 self.assertEqual(snapshot(source, 'klipper')[1], first)
                 (source / 'Makefile').write_text('# changed\n')
