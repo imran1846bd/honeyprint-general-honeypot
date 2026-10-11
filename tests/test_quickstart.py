@@ -78,6 +78,24 @@ telemetry:
             finally:
                 if process.poll() is None:process.kill();process.communicate(timeout=15)
 
+    def test_explicit_framework_stop_closes_companion_services(self):
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);command,ports=self.setup_paths(root)
+            process=subprocess.Popen(command,cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            try:
+                deadline=time.monotonic()+10
+                while not runtime_ready(root/'runtime/events.sqlite3',0,{'custom_01'}):
+                    if time.monotonic()>deadline or process.poll() is not None:self.fail('Runtime did not start')
+                    time.sleep(0.05)
+                stopped=subprocess.run([sys.executable,str(ROOT/'main.py'),'stop','--runtime-dir',str(root/'runtime')],
+                                       cwd=ROOT,capture_output=True,text=True,timeout=5)
+                self.assertEqual(stopped.returncode,0,stopped.stderr)
+                stdout,stderr=process.communicate(timeout=15)
+                self.assertEqual(process.returncode,0,stdout+stderr)
+                self.assert_closed(ports)
+            finally:
+                if process.poll() is None:process.kill();process.communicate(timeout=15)
+
     def test_occupied_dashboard_port_does_not_start_framework(self):
         with TemporaryDirectory() as tmp,socket.socket() as occupied:
             root=Path(tmp);command,ports=self.setup_paths(root)
