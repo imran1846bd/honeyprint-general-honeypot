@@ -75,6 +75,10 @@ def validate_rpc(message):
     params=data.get('params',{})
     if not isinstance(params,dict): raise ValueError('Invalid parameters')
     method=data['method']
+    if method=='printer.print.start':
+        filename=params.get('filename','')
+        if not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.gcode',filename,re.I):
+            raise ValueError('Prints require a retained G-code filename')
     if method.startswith('server.files.') and method not in ('server.files.list','server.files.metadata'):
         for key in ('path','source','dest'):
             if key in params and (not isinstance(params[key],str) or not params[key].startswith('gcodes/') or '..' in params[key].split('/')):
