@@ -20,6 +20,7 @@ from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
 from deployment.environment_manager import OctoPrintEnvironment
 from recipes.octoprint import OCTOPRINT_VERSION
+from plugins.manufacturing.pipeline import STAGES, validate_stages
 
 
 @dataclass
@@ -79,13 +80,14 @@ class OctoPrintAdapter(PlatformAdapter):
     def capabilities(self):
         return {
             'deployment': ['managed', 'attach'], 'simulators': ['virtual_printer'],
-            'services': ['web_port'], 'stages': [], 'extensions': [],
+            'services': ['web_port'], 'stages': list(STAGES), 'extensions': [],
             'instrumentation': ['plugin', 'http', 'gcode', 'state'],
             'recipes': {'managed': 'octoprint_managed', 'attach': 'octoprint_attach'},
         }
 
     def validate(self, cfg, context):
         profile = load_profile(cfg['printer_profile'])
+        validate_stages(cfg.get('stages', ()))
         if cfg['platform'] != self.platform_id or cfg['simulation'] != 'virtual_printer':
             raise AdapterError('Only the OctoPrint Virtual Printer recipe is supported')
         if context['recipe']['versions'].get('octoprint') != OCTOPRINT_VERSION:
