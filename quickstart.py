@@ -1,5 +1,6 @@
 """Start the local framework, alert watcher and evidence dashboard together."""
 import argparse
+from contextlib import closing
 import http.client
 import json
 import os
@@ -17,14 +18,14 @@ ROOT = Path(__file__).resolve().parent
 
 def last_sequence(database):
     if not database.exists(): return 0
-    with sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=1) as connection:
+    with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=1)) as connection:
         return connection.execute('SELECT COALESCE(MAX(sequence),0) FROM events').fetchone()[0]
 
 
 def runtime_ready(database, baseline, expected):
     if not database.exists(): return False
     try:
-        with sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=0.2) as connection:
+        with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=0.2)) as connection:
             rows=connection.execute('SELECT payload FROM events WHERE sequence>?', (baseline,)).fetchall()
         observed=set()
         for row in rows:
