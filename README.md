@@ -4,6 +4,24 @@ HoneyPrint is a proposed configuration-driven framework for additive manufacturi
 
 **Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Five manufacturing stages, simplified physical models and private G-code artifact retention are implemented for the custom example. Klipper deployment remains future work; a validated MCU simulation backend is required before Klipper can be declared supported. The architecture below remains the full target framework.
 
+## Run the local prototype
+
+On macOS or Linux with Python 3.10 or newer:
+
+```bash
+./run.sh
+```
+
+The first run creates a repository-local `.venv` and installs the pinned core dependency. It starts the custom printer at `http://127.0.0.1:8083`, the incremental alert watcher and the evidence dashboard at `http://127.0.0.1:8090`. Ctrl-C stops the owned services. Internet access is needed for dependency installation; subsequent starts reuse the environment.
+
+Use `./run.sh --duration 30` for a bounded run, or pass `--config`, `--runtime-dir` and `--dashboard-port` for another local setup. Existing standalone `main.py` commands remain available. `quickstart.py` waits for newly persisted lifecycle readiness events before starting analysis and checks the dashboard HTTP response before reporting local service readiness. A startup failure shuts down owned children and returns a nonzero exit code.
+
+This default launches the custom prototype. It does not install OctoPrint, Docker, Klipper, Moonraker or an MCU emulator. To select the separately installed pinned OctoPrint runtime, use:
+
+```bash
+./run.sh --config configs/instances/octoprint.yaml --octoprint-python /absolute/path/to/octoprint-python
+```
+
 ## 1. Research objective and design boundaries
 
 One shared framework should instantiate supported platform implementations through registered adapters. Reusable responsibilities include schema validation, capability checking, instance identity, lifecycle management, normalized telemetry, persistent evidence storage and a read-only analysis dashboard. Platform adapters are responsible for preparing, starting or attaching to, and observing their software.
