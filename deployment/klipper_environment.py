@@ -1,12 +1,13 @@
 """Owned, isolated upstream Klipper containers; no host devices or socket mounts."""
 import json
+import os
 import subprocess
 import uuid
 from dataclasses import dataclass
 from adapters.base_adapter import AdapterError
 
 IMAGE = 'honeyprint-klipper:1'
-PINS = {'klipper': 'e2b99a9159f992169c1ba53029dec020e850cc99',
+PINS = {'klipper': os.environ.get('_HONEYPRINT_KLIPPER_REV', 'e2b99a9159f992169c1ba53029dec020e850cc99'),
         'moonraker': '9e676eba6b02661a4dfa3ec6e7ac3f3504498e6d',
         'simulavr': '32985f745c237bf8dcd2718235d01c8b1fb0491d'}
 
@@ -31,11 +32,14 @@ class KlipperEnvironment:
 
     @classmethod
     def prepare(cls):
-        info = json.loads(docker('image', 'inspect', IMAGE))[0]
+        info = json.loads(docker('image', 'inspect', os.environ.get('_HONEYPRINT_KLIPPER_IMAGE', IMAGE)))[0]
         labels = info['Config'].get('Labels') or {}
         if any(labels.get('org.honeyprint.' + key + '.revision') != value
                for key, value in PINS.items()):
             raise AdapterError('Klipper image source revisions do not match the recipe')
+        source_hash = os.environ.get('_HONEYPRINT_KLIPPER_SOURCE_SHA256')
+        if source_hash and labels.get('org.honeyprint.klipper.source.sha256') != source_hash:
+            raise AdapterError('Klipper image does not match the selected local source snapshot')
         if info['Config']['User'] != '10001:10001':
             raise AdapterError('Klipper image must use the unprivileged runtime account')
         token = uuid.uuid4().hex
