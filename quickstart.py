@@ -42,7 +42,7 @@ def stop_children(children):
             try: os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError: pass
     for process in reversed(children):
-        try: process.wait(timeout=30)
+        try: process.wait(timeout=60)
         except subprocess.TimeoutExpired:
             try: os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError: pass
@@ -109,6 +109,7 @@ def main(argv=None):
         print(f'Local services ready. Dashboard: http://127.0.0.1:{args.dashboard_port}. Ctrl-C stops all services.',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
+            if children[0].poll() == 0:break  # Explicit framework stop also closes companion services.
             if any(p.poll() is not None for p in children):raise RuntimeError('A local service stopped unexpectedly')
             if args.duration is not None and time.monotonic()-started>=args.duration:break
         return 0
