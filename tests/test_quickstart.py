@@ -125,6 +125,8 @@ while True:time.sleep(.1)
             occupied.bind(('127.0.0.1',ports[1]));occupied.listen()
             result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,1)
+            self.assertIn(f'dashboard port {ports[1]} is already in use',result.stderr)
+            self.assertIn('HONEYPRINT_DASHBOARD_PORT',result.stderr)
             self.assertFalse((root/'runtime/control.json').exists())
             self.assert_closed([ports[0]])
 
