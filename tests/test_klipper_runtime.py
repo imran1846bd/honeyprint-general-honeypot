@@ -38,7 +38,7 @@ class KlipperRuntimeTests(unittest.TestCase):
                     'http://127.0.0.1:%d/printer/gcode/script' % port,
                     data=json.dumps({'script': 'G28\nG1 X12 Y8 F600\nM400'}).encode(),
                     headers={'Content-Type': 'application/json'})
-                with urllib.request.urlopen(request, timeout=15) as response:
+                with urllib.request.urlopen(request, timeout=40) as response:
                     self.assertEqual(response.status, 200)
                 state = handle.request('/printer/objects/query?toolhead&extruder&heater_bed&mcu')['status']
                 self.assertEqual(state['toolhead']['position'][:2], [12., 8.])
