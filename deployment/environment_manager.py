@@ -17,6 +17,7 @@ import yaml
 
 from core.profile_loader import load_profile, octoprint_profile
 from recipes.octoprint import OCTOPRINT_VERSION
+from deployment.source_camera import SourceCamera
 
 
 class EnvironmentError(RuntimeError):
@@ -43,6 +44,7 @@ class OctoPrintEnvironment:
         self.python = Path(python).absolute()
         self.instance_id = instance_id
         self.process = None
+        self.camera = None
         self._lock_file = None
         self._log_file = None
 
@@ -106,6 +108,10 @@ class OctoPrintEnvironment:
                 'serial': {'port': 'VIRTUAL', 'autoconnect': False},
                 'printerProfiles': {'default': profile['id']},
             }
+            source_dir = os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_DIR')
+            if source_dir and (Path(source_dir) / 'tools/simulated_webcam.py').is_file():
+                self.camera = SourceCamera(self.root, self.python, source_dir)
+                settings['plugins']['classicwebcam'] = self.camera.settings()
             for folder in ('plugins', 'printerProfiles'):
                 (self.root / folder).mkdir(exist_ok=True)
             config_path = self.root / 'config.yaml'
@@ -134,6 +140,8 @@ class OctoPrintEnvironment:
         self._log_file = open(self.root / 'server-console.log', 'ab')
         os.chmod(self.root / 'server-console.log', 0o600)
         try:
+            if self.camera is not None:
+                self.camera.start()
             self.process = subprocess.Popen(
                 [str(self.python), '-m', 'octoprint', '--basedir', str(self.root),
                  'serve', '--host', '127.0.0.1', '--port', str(port)],
@@ -157,6 +165,9 @@ class OctoPrintEnvironment:
             except ProcessLookupError:
                 self.process.wait(timeout=5)
         self.process = None
+        if self.camera is not None:
+            self.camera.stop()
+            self.camera = None
         if self._log_file:
             self._log_file.close()
             self._log_file = None
