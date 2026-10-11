@@ -4,6 +4,7 @@ The MCU and Moonraker remain on an internal Docker network. The loopback bridge
 serves Mainsail, native JSON API and G-code files, and forwards live WebSocket RPC.
 """
 import math
+import re
 import threading
 import time
 from pathlib import Path
@@ -14,6 +15,12 @@ from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
 from deployment.klipper_environment import KlipperEnvironment, PINS
 from plugins.manufacturing.pipeline import STAGES, validate_stages
+
+
+def revision_matches(version, revision):
+    """Match Git's seven to forty digit abbreviated native commit identity."""
+    candidates = re.findall(r'(?:^|g|-)([0-9a-f]{7,40})(?=$|[-+])', version)
+    return any(revision.startswith(candidate) for candidate in candidates)
 
 
 class KlipperAdapter(PlatformAdapter):
@@ -82,7 +89,7 @@ class KlipperAdapter(PlatformAdapter):
             temperature = state['extruder']['temperature']
             ready = (server['klippy_connected'] and server['klippy_state'] == 'ready'
                      and not server['failed_components'] and not server['warnings']
-                     and PINS['klipper'][:8] in mcu['mcu_version']
+                     and revision_matches(mcu['mcu_version'], PINS['klipper'])
                      and mcu['mcu_constants']['MCU'] == 'atmega644p'
                      and mcu['last_stats'].get('bytes_read', 0) > 0
                      and math.isfinite(temperature) and 0 < temperature < 350
