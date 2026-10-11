@@ -67,7 +67,7 @@ The same launcher can build trusted local OctoPrint and Klipper source folders. 
 
 ```dotenv
 HONEYPRINT_PLATFORM=all
-HONEYPRINT_OCTOPRINT_SOURCE="/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/OctoPrint-dev 2"
+HONEYPRINT_OCTOPRINT_SOURCE="/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/OctoPrint-dev"
 HONEYPRINT_KLIPPER_SOURCE=/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/klipper-master
 HONEYPRINT_OCTOPRINT_PYTHON=
 ```
@@ -75,6 +75,8 @@ HONEYPRINT_OCTOPRINT_PYTHON=
 Run `./run.sh`. Change only `HONEYPRINT_PLATFORM` to `octoprint`, `klipper` or `custom` when running one platform; env source paths for other platforms are ignored. Relative source paths resolve from the env file's directory. `--octoprint-source` and `--klipper-source` also accept source folders. Source selection requires bootstrap; it cannot be combined with `--no-bootstrap`.
 
 HoneyPrint hashes and copies the source into `.honeyprint/local-sources`, preserving the original folder. OctoPrint is installed into a separate environment using that source's declared dependencies. Klipper is compiled together with its host software into a separate Docker image, retaining the pinned Moonraker and SimulAVR components and the existing isolated runtime. Archive downloads receive a local snapshot Git commit so native MCU readiness can verify the compiled revision; this is not an upstream commit identifier. Selected source hashes are recorded in deployment recipe metadata. A source change produces a new cache identity on the next launch.
+
+Local virtual environments, nested worktrees, build output and source audit databases are excluded from the snapshot. If the selected OctoPrint source includes `tools/simulated_webcam.py`, HoneyPrint starts it on a separate loopback port and configures the native Control webcam. This camera displays an independent demo animation; it does not represent actual print motion. Its process is stopped with the managed instance, and camera process failures make runtime health unready. Source-supplied audit plugins retain their own storage; HoneyPrint's normalized telemetry continues through its managed audit plugin.
 
 Initial builds require internet access and may take several minutes. These are trusted developer sources: Python package installation and Docker builds execute their build instructions. The downloaded OctoPrint development version has different dependencies from the pinned release, so the two environments remain separate. Existing supported simulator, telemetry and dashboard behavior still needs runtime compatibility with each selected source version; arbitrary platform forks are not guaranteed to work.
 
