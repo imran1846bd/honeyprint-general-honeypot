@@ -1,11 +1,14 @@
 """Managed upstream Klipper with real AVR firmware and passive state observations.
 
-The MCU and Moonraker remain on an internal Docker network. This adapter does
-expose WebSocket or general file uploads; its bounded JSON bridge captures requests.
+The MCU and Moonraker remain on an internal Docker network. The loopback bridge
+serves Mainsail, native JSON API and G-code files, and forwards live WebSocket RPC.
 """
 import math
 import threading
 import time
+from pathlib import Path
+from telemetry.artifact_storage import ArtifactStorage
+from deployment.mainsail import installed
 from adapters.klipper.http_bridge import create_bridge
 from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
@@ -16,7 +19,10 @@ from plugins.manufacturing.pipeline import STAGES, validate_stages
 class KlipperAdapter(PlatformAdapter):
     platform_id = 'klipper'
 
-    def __init__(self):
+    def __init__(self, *, runtime_dir=None):
+        self.runtime_dir = Path(runtime_dir or ".honeyprint")
+        self.artifacts = None
+        self.frontend = None
         self.environment = None
         self.profile = None
         self.stopped = threading.Event()
@@ -28,7 +34,7 @@ class KlipperAdapter(PlatformAdapter):
 
     def capabilities(self):
         return {'deployment': ['managed'], 'simulators': ['avr_sim'],
-                'services': ['web_port'], 'stages': list(STAGES),
+                'services': ['web_port'], 'stages': list(STAGES), 'frontends': ['mainsail'], 'apis': ['moonraker'],
                 'recipes': {'managed': 'klipper_managed'}}
 
     def validate(self, cfg, context):
@@ -41,6 +47,8 @@ class KlipperAdapter(PlatformAdapter):
         if self.environment is not None:
             raise AdapterError('Klipper adapter is already prepared')
         self.profile = load_profile(plan['config']['printer_profile'])
+        self.frontend = installed() if plan["config"].get("frontend") == "mainsail" else None
+        self.artifacts = ArtifactStorage(self.runtime_dir / "artifacts" / plan["config"]["id"])
         self.environment = KlipperEnvironment.prepare()
         self.stopped.clear()
         self.observer_error = False
@@ -50,7 +58,7 @@ class KlipperAdapter(PlatformAdapter):
             raise AdapterError('Klipper adapter has not been prepared')
         self.environment.start(self.profile)
         try:
-            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: self.sink(event) if self.sink else None)
+            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: self.sink(event) if self.sink else None, artifacts=self.artifacts, frontend=self.frontend)
         except Exception:
             self.environment.stop()
             raise AdapterError("Klipper API bridge could not bind") from None
@@ -78,7 +86,7 @@ class KlipperAdapter(PlatformAdapter):
                      and mcu['mcu_constants']['MCU'] == 'atmega644p'
                      and mcu['last_stats'].get('bytes_read', 0) > 0
                      and math.isfinite(temperature) and 0 < temperature < 350
-                     and not self.observer_error)
+                     and not self.observer_error and not (self.server and self.server.audit_failed))
             return {'ready': bool(ready), 'mcu': 'atmega644p',
                     'mcu_version': mcu['mcu_version'], 'temperature': temperature,
                     'simulation': True, 'virtual_homing': True}
