@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent
@@ -55,15 +56,35 @@ def stop_children(children):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Run local HoneyPrint with analysis and dashboard.')
-    parser.add_argument('--config',type=Path,default=ROOT/'configs/instances/all.yaml')
-    parser.add_argument('--runtime-dir',type=Path,default=ROOT/'.honeyprint/quickstart')
-    parser.add_argument('--dashboard-port',type=int,default=8090)
+    parser.add_argument('--config',type=Path,help='Explicit YAML override of env selection')
+    parser.add_argument('--env-file',type=Path,default=ROOT/'.env')
+    parser.add_argument('--custom-code',type=Path)
+    parser.add_argument('--custom-python',type=Path)
+    parser.add_argument('--custom-health-path')
+    parser.add_argument('--runtime-dir',type=Path)
+    parser.add_argument('--dashboard-port',type=int)
     parser.add_argument('--octoprint-python',type=Path)
     parser.add_argument('--attach-api-key-env')
     parser.add_argument('--no-bootstrap',action='store_true',help='Use already installed platform dependencies')
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
     args=parser.parse_args(argv)
-    if not 1 <= args.dashboard_port <= 65535: parser.error('Invalid dashboard port')
+    generated=None
+    try:
+        if args.config is None:
+            from deployment.env_config import read_env, build_config
+            folder=ROOT/'.honeyprint/launch';folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+            generated=tempfile.TemporaryDirectory(prefix='env-',dir=folder)
+            selected=build_config(read_env(args.env_file),args.env_file.absolute().parent,Path(generated.name))
+            args.config=selected['config_path']
+            for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path'):
+                if getattr(args,field) is None:setattr(args,field,selected[field])
+        args.runtime_dir=args.runtime_dir or ROOT/'.honeyprint/quickstart'
+        args.dashboard_port=args.dashboard_port or 8090
+        args.custom_health_path=args.custom_health_path or '/'
+        if not 1 <= args.dashboard_port <= 65535:raise ValueError('Invalid dashboard port')
+    except (OSError,ValueError,RuntimeError) as error:
+        if generated:generated.cleanup()
+        parser.error(str(error))
     if args.duration is not None and not 0 < args.duration <= 86400: parser.error('Invalid duration')
     children=[];stopping=threading.Event()
     previous={sig:signal.getsignal(sig) for sig in (signal.SIGINT,signal.SIGTERM)}
@@ -73,7 +94,8 @@ def main(argv=None):
         config=load_config(args.config)
         from core.builtin_registry import create_builtin_registry
         from core.validator import validate_config
-        validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python))
+        validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
+                           custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path))
         if not args.no_bootstrap:
             from deployment.bootstrap import install_selected
             args.octoprint_python = install_selected(config, args.octoprint_python)
@@ -89,6 +111,9 @@ def main(argv=None):
         command=[sys.executable,str(ROOT/'main.py'),'run',str(args.config.absolute()),'--runtime-dir',str(runtime)]
         if args.octoprint_python:command+=['--octoprint-python',str(args.octoprint_python.absolute())]
         if args.attach_api_key_env:command+=['--attach-api-key-env',args.attach_api_key_env]
+        if args.custom_code:command+=['--custom-code',str(args.custom_code.absolute())]
+        if args.custom_python:command+=['--custom-python',str(args.custom_python.absolute())]
+        command+=['--custom-health-path',args.custom_health_path]
         children.append(subprocess.Popen(command,cwd=ROOT,start_new_session=True))
         deadline=time.monotonic()+180
         while not runtime_ready(database,baseline,expected):
@@ -122,6 +147,7 @@ def main(argv=None):
         return 1
     finally:
         stop_children(children)
+        if generated:generated.cleanup()
         for sig,handler in previous.items():signal.signal(sig,handler)
         if children and children[0].returncode != 0:
             return 1
