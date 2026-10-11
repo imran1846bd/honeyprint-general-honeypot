@@ -9,7 +9,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import secrets
 import shutil
 import signal
 import subprocess
@@ -33,9 +32,8 @@ args = json.load(sys.stdin)
 s = settings(init=True, basedir=args['root'])
 g = FilebasedGroupManager()
 u = FilebasedUserManager(g, settings=s)
-if u.find_user('honeyprint') is None:
-    u.add_user('honeyprint', args['password'], groups=[g.admin_group], active=True)
-print(json.dumps({'api_key': u.generate_api_key('honeyprint')}))
+u.add_user(args['username'], args['password'], groups=[g.admin_group], active=True, overwrite=True)
+print(json.dumps({'api_key': u.generate_api_key(args['username'])}))
 '''
 
 
@@ -88,9 +86,7 @@ class OctoPrintEnvironment:
                     self._lock_file = None
                     raise EnvironmentError('Instance directory is already in use') from None
             credentials_path = self.root / 'credentials.json'
-            credentials = json.loads(credentials_path.read_text()) if credentials_path.exists() else {
-                'username': 'honeyprint', 'password': secrets.token_urlsafe(32),
-            }
+            credentials = {'username': 'admin', 'password': 'admin'}
             flags = config.get('instrumentation', {})
             settings = {
                 'server': {'firstRun': False, 'onlineCheck': {'enabled': False},
@@ -120,7 +116,7 @@ class OctoPrintEnvironment:
             source = Path(__file__).resolve().parents[1] / 'adapters/octoprint/audit_plugin.py'
             shutil.copyfile(source, self.root / 'plugins/honeyprint_audit.py')
             result = subprocess.run([str(self.python), '-c', _BOOTSTRAP],
-                                    input=json.dumps({'root': str(self.root), 'password': credentials['password']}),
+                                    input=json.dumps({'root': str(self.root), 'username': credentials['username'], 'password': credentials['password']}),
                                     text=True, capture_output=True, check=True, timeout=30)
             credentials['api_key'] = json.loads(result.stdout.strip().splitlines()[-1])['api_key']
             self._private_json(credentials_path, credentials)
