@@ -111,7 +111,7 @@ class OctoPrintEnvironment:
             source_dir = os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_DIR')
             if source_dir and (Path(source_dir) / 'tools/simulated_webcam.py').is_file():
                 self.camera = SourceCamera(self.root, self.python, source_dir)
-                settings['plugins']['classicwebcam'] = self.camera.settings()
+                settings['plugins']['classicwebcam'] = dict(self.camera.settings(), _config_version=1)
             for folder in ('plugins', 'printerProfiles'):
                 (self.root / folder).mkdir(exist_ok=True)
             config_path = self.root / 'config.yaml'
