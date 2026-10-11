@@ -24,6 +24,7 @@ class KlipperAdapter(PlatformAdapter):
         self.observer_error = False
         self.server = None
         self.server_thread = None
+        self.sink = None
 
     def capabilities(self):
         return {'deployment': ['managed'], 'simulators': ['avr_sim'],
@@ -49,7 +50,7 @@ class KlipperAdapter(PlatformAdapter):
             raise AdapterError('Klipper adapter has not been prepared')
         self.environment.start(self.profile)
         try:
-            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: None)
+            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: self.sink(event) if self.sink else None)
         except Exception:
             self.environment.stop()
             raise AdapterError("Klipper API bridge could not bind") from None
@@ -87,8 +88,7 @@ class KlipperAdapter(PlatformAdapter):
     def observe(self, instance, sink):
         if instance is not self.environment or self.observer is not None:
             raise AdapterError('Invalid Klipper observation setup')
-        self.server.server_close()
-        self.server = create_bridge(instance, self.server.server_address[1], sink)
+        self.sink = sink
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
         def poll():
@@ -131,6 +131,7 @@ class KlipperAdapter(PlatformAdapter):
             self.observer = None
         instance.stop()
         self.environment = None
+        self.sink = None
 
     def cleanup_prepared(self, plan):
         if self.environment is not None:
