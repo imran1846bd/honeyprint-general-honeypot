@@ -3,6 +3,8 @@ schema_version: 1
 instances:
   - id: klipper_01
     platform: klipper
+    frontend: mainsail
+    api: moonraker
     deployment: managed
     printer_profile: ../profiles/virtual_lab.yaml
     simulation: avr_sim
@@ -12,5 +14,5 @@ instances:
 telemetry:
   backend: sqlite
   capture_requests: true
-  capture_commands: false
+  capture_commands: true
   capture_state_changes: true
