@@ -24,9 +24,12 @@ class ManufacturingService:
         self.sink = sink
         self._lock = RLock()
         self._failed = False
+        self._closed = False
 
     def submit(self, content, *, name='job.gcode'):
         with self._lock:
+            if self._closed:
+                raise RuntimeError('Manufacturing service is closed')
             if self._failed:
                 raise RuntimeError('Manufacturing evidence failed; create a new service before further jobs')
             candidate = deepcopy(self.simulator)
@@ -49,3 +52,8 @@ class ManufacturingService:
     def snapshot(self):
         with self._lock:
             return self.simulator.snapshot()
+
+    def close(self):
+        """Reject future submissions after the owning runtime begins shutdown."""
+        with self._lock:
+            self._closed = True
