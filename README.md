@@ -12,13 +12,13 @@ On macOS or Linux, select the platform in `.env` and run with Python 3.10 throug
 ./run.sh
 ```
 
-The first run creates a repository-local `.venv` and installs the pinned core dependency. It prepares a separately pinned OctoPrint environment, builds the pinned Klipper image when needed, and downloads the pinned Mainsail release after verifying its SHA-256 hash. It starts OctoPrint at `http://127.0.0.1:8081`, Mainsail and the native Klipper API at `http://127.0.0.1:8082`, the custom printer at `http://127.0.0.1:8083`, the incremental alert watcher and the evidence dashboard at `http://127.0.0.1:8090`. Ctrl-C or `main.py stop --runtime-dir .honeyprint/quickstart` stops the owned services. Internet access is needed for dependency installation; subsequent starts reuse the environment.
+The first run creates the local core environment and prepares dependencies for the selected platform. One selected honeypot runs at `http://127.0.0.1:8081` by default, whether it is OctoPrint, Klipper/Mainsail or custom. Normalized events from every selection accumulate in `.honeyprint/quickstart/events.sqlite3`; analysis findings use `analysis.sqlite3` in the same folder. The analysis watcher runs without another web URL. Set `HONEYPRINT_ANALYST_ENABLED=true` only when you want the optional read-only dashboard on port 8090. Ctrl-C or `main.py stop --runtime-dir .honeyprint/quickstart` stops owned services. Internet access is needed for initial dependency installation; subsequent starts reuse the environment.
 
 The managed local OctoPrint login is username `admin` and password `admin`, including after a restart. Its generated API key remains in the private instance credentials file; attached external OctoPrint accounts are unchanged.
 
 Use `./run.sh --duration 30` for a bounded run, or pass `--config`, `--runtime-dir` and `--dashboard-port` for another local setup. Existing standalone `main.py` commands remain available. `quickstart.py` waits for newly persisted lifecycle readiness events before starting analysis and checks the dashboard HTTP response before reporting local service readiness. A startup failure shuts down owned children and returns a nonzero exit code.
 
-Docker must already be installed and running. The default env template selects all three supported backends; image compilation can take several minutes. Use `./run.sh --config configs/instances/custom.yaml` for the custom backend alone. `--no-bootstrap` requires existing dependencies, and `--octoprint-python` selects an existing interpreter. To run OctoPrint alone, use:
+Docker must already be installed and running. The default env template selects OctoPrint; selecting Klipper prepares its image, which can take several minutes. Use `./run.sh --config configs/instances/custom.yaml` for the custom backend alone. `--no-bootstrap` requires existing dependencies, and `--octoprint-python` selects an existing interpreter. To run OctoPrint alone, use:
 
 ```bash
 ./run.sh --config configs/instances/octoprint.yaml --octoprint-python /absolute/path/to/octoprint-python
@@ -39,21 +39,36 @@ cp .env.example .env
 | `HONEYPRINT_PLATFORM=klipper` | Klipper AVR simulation, Moonraker and Mainsail |
 | `HONEYPRINT_PLATFORM=custom` with blank custom code | Built-in custom printer lab |
 | `HONEYPRINT_PLATFORM=custom` with a custom code path | Your trusted Python HTTP honeypot |
-| `HONEYPRINT_PLATFORM=all` | All three configured platform families together |
+| `HONEYPRINT_PLATFORM=custom` with `HONEYPRINT_CUSTOM_API_URL` | An owned HTTP bridge to your existing API |
+| `HONEYPRINT_PLATFORM=all` (advanced explicit opt-in) | All three configured platform families together |
 
-The launcher selects compatible simulator, recipe and frontend identifiers. `HONEYPRINT_PORT` overrides one platform's exposed port; leave it blank for `all`. `HONEYPRINT_DASHBOARD_PORT`, `HONEYPRINT_RUNTIME_DIR` and `HONEYPRINT_INSTANCE_ID` control the dashboard, evidence location and single instance identity. Optional `HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated profile values without editing YAML. Blank values preserve profile defaults.
+The launcher selects compatible simulator, recipe and frontend identifiers. Every single-platform selection uses the same `HONEYPRINT_PORT` (default 8081); changing the platform changes the honeypot behind that URL. Keep `HONEYPRINT_RUNTIME_DIR` unchanged to retain all platform evidence in one database. `HONEYPRINT_INSTANCE_ID` can name your own honeypot. `HONEYPRINT_PORT` overrides one platform's exposed port; leave it blank for `all`. `HONEYPRINT_DASHBOARD_PORT`, `HONEYPRINT_RUNTIME_DIR` and `HONEYPRINT_INSTANCE_ID` control the dashboard, evidence location and single instance identity. Optional `HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated profile values without editing YAML. Blank values preserve profile defaults.
 
 For your own code, edit only these selections:
 
 ```dotenv
 HONEYPRINT_PLATFORM=custom
 HONEYPRINT_CUSTOM_CODE=examples/custom_server.py
-HONEYPRINT_PORT=8083
+HONEYPRINT_PORT=8081
 HONEYPRINT_DASHBOARD_PORT=8090
 HONEYPRINT_WIDTH=300
 ```
 
 Replace the code path with your entry file. Relative paths resolve from the env file's directory. Optional `HONEYPRINT_CUSTOM_PYTHON` selects an interpreter with your dependencies already installed; `HONEYPRINT_CUSTOM_HEALTH_PATH` defaults to `/`. The example is a runnable developer-owned server, separate from the built-in custom lab.
+
+For an already running custom HTTP API, use these values instead of a code path:
+
+```dotenv
+HONEYPRINT_PLATFORM=custom
+HONEYPRINT_PORT=8081
+HONEYPRINT_CUSTOM_CODE=
+HONEYPRINT_CUSTOM_API_URL=http://127.0.0.1:5000
+HONEYPRINT_CUSTOM_HEALTH_PATH=/
+HONEYPRINT_RUNTIME_DIR=.honeyprint/quickstart
+HONEYPRINT_ANALYST_ENABLED=false
+```
+
+The API URL can include a base path. HoneyPrint forwards bounded HTTP GET/POST/PUT/DELETE requests and records methods and status in the shared evidence database. It checks the configured health path and leaves the upstream service running when the local bridge stops. This adapter supports ordinary HTTP responses up to 2 MiB and requests up to 1 MiB; WebSocket, video streaming and arbitrary non-HTTP protocols require a dedicated adapter. Give either a code path or API URL. Requests sent directly to the upstream API bypass HoneyPrint capture, so use the honeypot URL. A YAML configuration remains available through `--config`; custom connection settings can be passed with `--custom-code` or `--custom-api-url`.
 
 Your Python server must bind `HONEYPRINT_HOST` and `HONEYPRINT_PORT` supplied by the framework, and return a successful health response with `X-HoneyPrint-Instance` equal to the supplied `HONEYPRINT_INSTANCE_TOKEN`. The framework also supplies the selected profile as `HONEYPRINT_PROFILE_JSON`. Keep worker processes in the owned process group so shutdown can clean them up. These small interface requirements let the framework verify readiness and proxy native HTTP behavior without requiring a platform adapter or registry changes. They do not automatically convert arbitrary scripts into printer emulators. Custom code executes as trusted local developer code; this launcher does not sandbox it or install its dependencies.
 
@@ -66,7 +81,7 @@ The proxy captures request methods/status without bodies, credentials or command
 The same launcher can build trusted local OctoPrint and Klipper source folders. For the folders supplied with this project, set:
 
 ```dotenv
-HONEYPRINT_PLATFORM=all
+HONEYPRINT_PLATFORM=octoprint
 HONEYPRINT_OCTOPRINT_SOURCE="/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/OctoPrint-dev"
 HONEYPRINT_KLIPPER_SOURCE=/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/klipper-master
 HONEYPRINT_OCTOPRINT_PYTHON=
