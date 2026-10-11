@@ -51,10 +51,10 @@ class OctoPrintEnvironment:
     def verify_runtime(self):
         try:
             result = subprocess.run(
-                [str(self.python), '-c', "import importlib.metadata; print(importlib.metadata.version('OctoPrint'))"],
+                [str(self.python), '-c', "import importlib.metadata; from packaging.version import Version; print(Version(importlib.metadata.version('OctoPrint')) == Version(" + repr(OCTOPRINT_VERSION) + "))"],
                 check=True, capture_output=True, text=True, timeout=15,
             )
-            if result.stdout.strip() != OCTOPRINT_VERSION:
+            if result.stdout.strip() != 'True':
                 raise EnvironmentError('Installed OctoPrint version does not match the recipe')
         except (OSError, subprocess.SubprocessError):
             raise EnvironmentError('Pinned OctoPrint interpreter is unavailable') from None
