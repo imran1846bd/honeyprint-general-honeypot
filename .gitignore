@@ -7,3 +7,8 @@ __pycache__/
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Local launch preferences may contain private paths or settings.
+.env
+.env.*
+!.env.example
