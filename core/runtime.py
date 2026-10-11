@@ -7,6 +7,8 @@ import time
 
 from core.dependency_resolver import resolve_dependencies
 from core.event_bus import EventBus
+from core.manufacturing_service import ManufacturingService
+from telemetry.artifact_storage import ArtifactStorage
 from core.instance_builder import build_instances
 from core.lifecycle_manager import LifecycleManager
 from deployment.control import ControlServer
@@ -83,6 +85,12 @@ class FrameworkRuntime:
             for instance in instances.values():
                 if self.stop_event.is_set():
                     break
+                if instance.plan.config.get('stages'):
+                    instance.resources['manufacturing'] = ManufacturingService(
+                        instance.plan, artifact_storage=ArtifactStorage(
+                            self.runtime_dir / 'artifacts' / instance.instance_id),
+                        sink=self._sink(instance.instance_id, instance.plan.config['platform']),
+                    )
                 controller = LifecycleManager(
                     instance, base_dir=self.base_dir,
                     sink=self._sink(instance.instance_id, instance.plan.config['platform']),
