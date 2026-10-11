@@ -58,13 +58,16 @@ class SharedManufacturingTests(unittest.TestCase):
                     'capture_commands':True,'capture_state_changes':True}}
             registry=create_builtin_registry(runtime_dir=root,octoprint_python=python)
             app=FrameworkRuntime(config,registry,base_dir=ROOT,runtime_dir=root)
+            services=[]
             def ready(instance, report):
+                services.append(instance.resources['manufacturing'])
                 result=instance.resources['manufacturing'].submit(JOB)
                 self.assertTrue(result['inspection']['passed'])
                 self.assertEqual(result['execution_mode'],'shadow')
                 if platform=='custom_lab':
                     self.assertEqual(instance.resources['platform_handle'].position['x'],0)
             app.run(duration=0.2,on_ready=ready)
+            with self.assertRaises(RuntimeError): services[0].submit(JOB)
             with EvidenceReader(root/'events.sqlite3') as raw:
                 stages=[row['event'] for row in raw.read_events() if row['event']['event_type']=='manufacturing.stage']
                 self.assertEqual(len(stages),5)
