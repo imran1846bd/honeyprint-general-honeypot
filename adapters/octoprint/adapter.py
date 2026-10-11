@@ -196,6 +196,11 @@ class OctoPrintAdapter(PlatformAdapter):
                 return {'ready': False}
             if handle.environment and (not handle.environment.process or handle.environment.process.poll() is not None):
                 return {'ready': False, 'process': False}
+            if handle.environment and handle.environment.camera:
+                camera = handle.environment.camera
+                evidence['camera_process'] = bool(camera.process and camera.process.poll() is None)
+                if not evidence['camera_process']:
+                    return {'ready': False, **evidence}
             evidence['version'] = api_request(handle, 'GET', '/api/version').get('server')
             self._check_virtual(handle)
             evidence['virtual_printer'] = True
