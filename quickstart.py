@@ -60,6 +60,8 @@ def main(argv=None):
     parser.add_argument('--config',type=Path,help='Explicit YAML override of env selection')
     parser.add_argument('--env-file',type=Path,default=ROOT/'.env')
     parser.add_argument('--custom-code',type=Path)
+    parser.add_argument('--custom-api-url')
+    parser.add_argument('--analyst', dest='analyst_enabled', action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument('--custom-python',type=Path)
     parser.add_argument('--custom-health-path')
     parser.add_argument('--runtime-dir',type=Path)
@@ -79,8 +81,9 @@ def main(argv=None):
             generated=tempfile.TemporaryDirectory(prefix='env-',dir=folder)
             selected=build_config(read_env(args.env_file),args.env_file.absolute().parent,Path(generated.name))
             args.config=selected['config_path']
-            for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path','octoprint_source','klipper_source'):
+            for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path','octoprint_source','klipper_source','custom_api_url','analyst_enabled'):
                 if getattr(args,field) is None:setattr(args,field,selected[field])
+        if args.analyst_enabled is None:args.analyst_enabled=True
         args.runtime_dir=args.runtime_dir or ROOT/'.honeyprint/quickstart'
         args.dashboard_port=args.dashboard_port or 8090
         args.custom_health_path=args.custom_health_path or '/'
@@ -98,7 +101,7 @@ def main(argv=None):
         from core.builtin_registry import create_builtin_registry
         from core.validator import validate_config
         validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
-                           custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path))
+                           custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url))
         if args.no_bootstrap and (args.octoprint_source or args.klipper_source):
             raise ValueError('Local sources require bootstrap to verify their builds')
         if not args.no_bootstrap:
@@ -106,17 +109,19 @@ def main(argv=None):
             args.octoprint_python = install_selected(config, args.octoprint_python, octoprint_source=args.octoprint_source, klipper_source=args.klipper_source)
         expected={instance['id'] for instance in config['instances']}
         if not expected:raise ValueError('No configured instances')
-        if any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
+        if args.analyst_enabled and any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
             raise ValueError('Dashboard port conflicts with a platform port')
         runtime=args.runtime_dir.absolute();database=runtime/'events.sqlite3';alerts=runtime/'analysis.sqlite3'
-        with socket.socket() as probe:
-            probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-            probe.bind(('127.0.0.1',args.dashboard_port))
+        if args.analyst_enabled:
+            with socket.socket() as probe:
+                probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                probe.bind(('127.0.0.1',args.dashboard_port))
         baseline=last_sequence(database)
         command=[sys.executable,str(ROOT/'main.py'),'run',str(args.config.absolute()),'--runtime-dir',str(runtime)]
         if args.octoprint_python:command+=['--octoprint-python',str(args.octoprint_python.absolute())]
         if args.attach_api_key_env:command+=['--attach-api-key-env',args.attach_api_key_env]
         if args.custom_code:command+=['--custom-code',str(args.custom_code.absolute())]
+        if args.custom_api_url:command+=['--custom-api-url',args.custom_api_url]
         if args.custom_python:command+=['--custom-python',str(args.custom_python.absolute())]
         command+=['--custom-health-path',args.custom_health_path]
         children.append(subprocess.Popen(command,cwd=ROOT,start_new_session=True))
@@ -127,20 +132,23 @@ def main(argv=None):
                 raise RuntimeError('Framework startup failed')
         children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.service','--database',str(database),
                                           '--alerts',str(alerts),'--watch'],cwd=ROOT,start_new_session=True))
-        children.append(subprocess.Popen([sys.executable,'-m','dashboard.server','--database',str(database),
-                                          '--alerts',str(alerts),'--port',str(args.dashboard_port)],cwd=ROOT,start_new_session=True))
-        deadline=time.monotonic()+10
-        while True:
-            if stopping.wait(0.1):return 0
-            if any(p.poll() is not None for p in children):raise RuntimeError('A local service stopped unexpectedly')
-            connection=http.client.HTTPConnection('127.0.0.1',args.dashboard_port,timeout=1)
-            try:
-                connection.request('GET','/api/events');response=connection.getresponse()
-                if response.status==200 and isinstance(json.loads(response.read(1048576)),list):break
-            except (OSError,ValueError,http.client.HTTPException):pass
-            finally:connection.close()
-            if time.monotonic()>deadline:raise RuntimeError('Dashboard startup failed')
-        print(f'Local services ready. Dashboard: http://127.0.0.1:{args.dashboard_port}. Ctrl-C stops all services.',flush=True)
+        if args.analyst_enabled:
+            children.append(subprocess.Popen([sys.executable,'-m','dashboard.server','--database',str(database),
+                                              '--alerts',str(alerts),'--port',str(args.dashboard_port)],cwd=ROOT,start_new_session=True))
+            deadline=time.monotonic()+10
+            while True:
+                if stopping.wait(0.1):return 0
+                if any(p.poll() is not None for p in children):raise RuntimeError('A local service stopped unexpectedly')
+                connection=http.client.HTTPConnection('127.0.0.1',args.dashboard_port,timeout=1)
+                try:
+                    connection.request('GET','/api/events');response=connection.getresponse()
+                    if response.status==200 and isinstance(json.loads(response.read(1048576)),list):break
+                except (OSError,ValueError,http.client.HTTPException):pass
+                finally:connection.close()
+                if time.monotonic()>deadline:raise RuntimeError('Dashboard startup failed')
+        links=', '.join(f'http://127.0.0.1:{i["services"]["web_port"]}' for i in config['instances'])
+        print(f'Local services ready. Honeypot: {links}. Logs: {database}. Ctrl-C stops all services.',flush=True)
+        if args.analyst_enabled:print(f'Optional analyst dashboard: http://127.0.0.1:{args.dashboard_port}',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
             if children[0].poll() == 0:break  # Explicit framework stop also closes companion services.
