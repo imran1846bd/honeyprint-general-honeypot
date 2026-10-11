@@ -131,4 +131,30 @@ while True:time.sleep(.1)
             self.assert_closed([ports[0]])
 
 
+    def test_existing_runtime_is_preserved_with_a_clear_stop_diagnostic(self):
+        import fcntl
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);command,ports=self.setup_paths(root)
+            runtime=root/'runtime';runtime.mkdir()
+            record=runtime/'control.json';record.write_text('existing record')
+            with (runtime/'control.lock').open('w') as lock:
+                fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
+                result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,1)
+            self.assertIn('This runtime is already running',result.stderr)
+            self.assertIn('main.py stop --runtime-dir',result.stderr)
+            self.assertEqual(record.read_text(),'existing record')
+            self.assert_closed(ports)
+
+    def test_occupied_honeypot_port_does_not_start_framework(self):
+        with TemporaryDirectory() as tmp,socket.socket() as occupied:
+            root=Path(tmp);command,ports=self.setup_paths(root)
+            occupied.bind(('127.0.0.1',ports[0]));occupied.listen()
+            result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,1)
+            self.assertIn(f'Honeypot port {ports[0]} is already in use',result.stderr)
+            self.assertFalse((root/'runtime/control.json').exists())
+            self.assert_closed([ports[1]])
+
+
 if __name__=='__main__':unittest.main()
