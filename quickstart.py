@@ -51,11 +51,12 @@ def stop_children(children):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Run local HoneyPrint with analysis and dashboard.')
-    parser.add_argument('--config',type=Path,default=ROOT/'configs/instances/custom.yaml')
+    parser.add_argument('--config',type=Path,default=ROOT/'configs/instances/all.yaml')
     parser.add_argument('--runtime-dir',type=Path,default=ROOT/'.honeyprint/quickstart')
     parser.add_argument('--dashboard-port',type=int,default=8090)
     parser.add_argument('--octoprint-python',type=Path)
     parser.add_argument('--attach-api-key-env')
+    parser.add_argument('--no-bootstrap',action='store_true',help='Use already installed platform dependencies')
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
     args=parser.parse_args(argv)
     if not 1 <= args.dashboard_port <= 65535: parser.error('Invalid dashboard port')
@@ -66,6 +67,12 @@ def main(argv=None):
     try:
         from core.config_loader import load_config
         config=load_config(args.config)
+        from core.builtin_registry import create_builtin_registry
+        from core.validator import validate_config
+        validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python))
+        if not args.no_bootstrap:
+            from deployment.bootstrap import install_selected
+            args.octoprint_python = install_selected(config, args.octoprint_python)
         expected={instance['id'] for instance in config['instances']}
         if not expected:raise ValueError('No configured instances')
         if any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
@@ -79,7 +86,7 @@ def main(argv=None):
         if args.octoprint_python:command+=['--octoprint-python',str(args.octoprint_python.absolute())]
         if args.attach_api_key_env:command+=['--attach-api-key-env',args.attach_api_key_env]
         children.append(subprocess.Popen(command,cwd=ROOT,start_new_session=True))
-        deadline=time.monotonic()+90
+        deadline=time.monotonic()+180
         while not runtime_ready(database,baseline,expected):
             if stopping.wait(0.1):return 0
             if children[0].poll() is not None or time.monotonic()>deadline:
