@@ -122,6 +122,10 @@ class FrameworkRuntime:
         except Exception as exc:
             failure = exc
         finally:
+            for instance in instances.values():
+                service = instance.resources.get('manufacturing')
+                if service is not None:
+                    service.close()
             for controller in reversed(self._controllers):
                 try:
                     controller.stop()
