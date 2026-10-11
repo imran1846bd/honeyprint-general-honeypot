@@ -76,6 +76,10 @@ def prepare_sources(platforms, octoprint_source, klipper_source, python=None):
                 result = subprocess.run([str(python), '-c', code], check=True, capture_output=True, text=True)
                 version = json.loads(result.stdout)['version']
                 marker.write_text(json.dumps({'version': version, 'sha256': digest}))
+            if (source / 'tools/simulated_webcam.py').is_file() and (source / 'simulated_uploaded_prusa.mp4').is_file():
+                check = subprocess.run([str(python), '-c', "import importlib.metadata; assert importlib.metadata.version('imageio-ffmpeg') == '0.6.0'"], capture_output=True)
+                if check.returncode:
+                    subprocess.run([str(python), '-m', 'pip', 'install', 'imageio-ffmpeg==0.6.0'], check=True)
             metadata = json.loads(marker.read_text())
             os.environ['_HONEYPRINT_OCTOPRINT_VERSION'] = metadata['version']
             os.environ['_HONEYPRINT_OCTOPRINT_SOURCE_SHA256'] = digest
