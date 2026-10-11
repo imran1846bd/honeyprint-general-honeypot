@@ -39,7 +39,11 @@ def runtime_ready(database, baseline, expected):
 def stop_children(children):
     for process in reversed(children):
         if process.poll() is None:
-            try: os.killpg(process.pid, signal.SIGTERM)
+            try:
+                if process is children[0]:
+                    process.send_signal(signal.SIGTERM)  # Core owns cleanup of its active Docker clients.
+                else:
+                    os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError: pass
     for process in reversed(children):
         try: process.wait(timeout=60)
