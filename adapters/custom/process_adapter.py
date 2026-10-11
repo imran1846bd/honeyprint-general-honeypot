@@ -46,22 +46,28 @@ class CustomProcessAdapter(PlatformAdapter):
         self.front_port=plan['config']['services']['web_port']
         with socket.socket() as probe:
             probe.bind(('127.0.0.1',0));self.backend_port=probe.getsockname()[1]
-    def launch_or_attach(self,plan):
+    def _start_backend(self):
         environment=dict(os.environ,HONEYPRINT_HOST='127.0.0.1',HONEYPRINT_PORT=str(self.backend_port),
                          HONEYPRINT_INSTANCE_TOKEN=self.token,HONEYPRINT_PROFILE_JSON=json.dumps(self.profile))
+        self.process=subprocess.Popen([str(self.python),'-u',str(self.entry)],cwd=self.entry.parent,
+                                      env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT,start_new_session=True)
+        def capture_log():
+            with self.log.open('wb') as output:
+                os.chmod(self.log,0o600)
+                while True:
+                    data=self.process.stdout.read1(4096)
+                    if not data:break
+                    if output.tell()+len(data)>1048576:output.seek(0);output.truncate()
+                    output.write(data);output.flush()
+        self.log_thread=threading.Thread(target=capture_log,daemon=True);self.log_thread.start()
+    def _connection(self, timeout):
+        return http.client.HTTPConnection('127.0.0.1', self.backend_port, timeout=timeout)
+    def _target_path(self, path):
+        return path
+    def launch_or_attach(self,plan):
         try:
-            self.process=subprocess.Popen([str(self.python),'-u',str(self.entry)],cwd=self.entry.parent,
-                                          env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
-                                          stderr=subprocess.STDOUT,start_new_session=True)
-            def capture_log():
-                with self.log.open('wb') as output:
-                    os.chmod(self.log,0o600)
-                    while True:
-                        data=self.process.stdout.read1(4096)
-                        if not data:break
-                        if output.tell()+len(data)>1048576:output.seek(0);output.truncate()
-                        output.write(data);output.flush()
-            self.log_thread=threading.Thread(target=capture_log,daemon=True);self.log_thread.start()
+            self._start_backend()
             adapter=self
             class Handler(BaseHTTPRequestHandler):
                 def setup(self):super().setup();self.connection.settimeout(3)
@@ -81,8 +87,8 @@ class CustomProcessAdapter(PlatformAdapter):
                         data=self.rfile.read(length)
                         if len(data)!=length:raise ValueError()
                         selected={key:self.headers[key] for key in ('Content-Type','Authorization','Cookie','Accept') if key in self.headers}
-                        connection=http.client.HTTPConnection('127.0.0.1',adapter.backend_port,timeout=10)
-                        connection.request(self.command,self.path,body=data or None,headers=selected)
+                        connection=adapter._connection(10)
+                        connection.request(self.command,adapter._target_path(self.path),body=data or None,headers=selected)
                         response=connection.getresponse();body=response.read(2097153)
                         if len(body)>2097152:raise ValueError()
                         status=response.status
@@ -105,7 +111,7 @@ class CustomProcessAdapter(PlatformAdapter):
             deadline=time.monotonic()+30
             while time.monotonic()<deadline:
                 if self.health(self)['ready']:return self
-                if self.process.poll() is not None:break
+                if self.process is not None and self.process.poll() is not None:break
                 time.sleep(.1)
             raise AdapterError('Custom code failed its owned HTTP health check; inspect custom.log')
         except Exception:
