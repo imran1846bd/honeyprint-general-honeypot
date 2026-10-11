@@ -57,6 +57,7 @@ class BridgeServer(ThreadingHTTPServer):
 
 def create_bridge(environment,port,emit,*,artifacts=None,frontend=None):
     class Handler(BaseHTTPRequestHandler):
+        rbufsize=0
         def setup(self):
             super().setup();self.connection.settimeout(5)
         def log_message(self,*args): pass
