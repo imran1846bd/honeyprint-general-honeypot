@@ -42,4 +42,8 @@ def install_selected(config, octoprint_python=None):
             subprocess.run(['docker', 'build', '-t', 'honeyprint-klipper:1',
                             str(ROOT / 'deployment/docker/klipper')], env=environment, check=True)
             KlipperEnvironment.prepare()
+    if any(item.get("frontend") == "mainsail" for item in config["instances"]):
+        from deployment.mainsail import prepare
+        print("Verifying pinned Mainsail web client", flush=True)
+        prepare()
     return selected
