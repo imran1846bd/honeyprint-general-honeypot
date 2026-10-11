@@ -110,6 +110,12 @@ class KlipperFrontendTests(unittest.TestCase):
                 self.assertTrue(adapter.health(handle)['ready'])
                 self.assertTrue(any(e['event_type']=='file.artifact' and e['metadata']['sha256']==digest for e in events))
                 self.assertTrue(any(e['event_type']=='printer.command' and e['metadata']['gcode']=='G28' for e in events))
+                client.close();client=None
+                deadline=time.monotonic()+8
+                while json.loads(http('/server/info')[1])['result']['websocket_count']:
+                    if time.monotonic()>deadline:self.fail('Native WebSocket helper leaked after disconnect')
+                    time.sleep(.1)
+                client=SocketClient(port)
                 # Stop with the WebSocket still connected: native helper and server workers must exit.
                 adapter.stop(handle)
                 self.assertFalse(handle.created_container);self.assertFalse(handle.created_network)
