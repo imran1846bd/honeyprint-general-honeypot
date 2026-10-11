@@ -4,14 +4,18 @@ Install the optional locked runtime separately. This metadata factory never
 installs software, connects a printer or claims deployment health.
 """
 
-OCTOPRINT_VERSION = '1.11.8'
+import os
+
+OCTOPRINT_VERSION = os.environ.get('_HONEYPRINT_OCTOPRINT_VERSION', '1.11.8')
 
 
 def managed_recipe() -> dict:
     return {
         'platform': 'octoprint', 'deployment': 'managed',
         'simulators': ['virtual_printer'],
-        'versions': {'octoprint': OCTOPRINT_VERSION},
+        'versions': {'octoprint': OCTOPRINT_VERSION,
+                     **({'octoprint_source_sha256': os.environ['_HONEYPRINT_OCTOPRINT_SOURCE_SHA256']}
+                        if os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_SHA256') else {})},
         'dependencies': [],
     }
 
