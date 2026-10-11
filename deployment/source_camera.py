@@ -30,7 +30,7 @@ class SourceCamera:
         self.log = (self.root / 'camera-console.log').open('ab')
         os.chmod(self.root / 'camera-console.log', 0o600)
         try:
-            command = [str(self.python), str(self.script), '--port', str(self.port)]
+            command = [str(self.python), '-u', str(self.script), '--port', str(self.port)]
             if self.video.is_file():
                 command.extend(['--video', str(self.video)])
             self.process = subprocess.Popen(
