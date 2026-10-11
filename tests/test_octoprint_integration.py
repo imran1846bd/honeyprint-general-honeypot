@@ -59,6 +59,15 @@ class OctoPrintIntegrationTests(unittest.TestCase):
                     headers={'Content-Type': 'application/json', 'X-CSRF-Token': token})
                 with browser.open(login, timeout=5) as response:
                     self.assertEqual(json.loads(response.read())['name'], 'admin')
+                camera = handle.environment.camera
+                if os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_DIR'):
+                    self.assertIsNotNone(camera)
+                    self.assertIsNone(camera.process.poll())
+                    camera_settings = api_request(handle, 'GET', '/api/settings')['plugins']['classicwebcam']
+                    self.assertEqual(camera_settings['snapshot'], camera.settings()['snapshot'])
+                    with urllib.request.urlopen(camera_settings['snapshot'], timeout=5) as response:
+                        self.assertTrue(response.read().startswith(b'\xff\xd8'))
+                    ready.append(('camera', camera.port))
                 api_request(handle, 'POST', '/api/printer/command', {'command': 'M105'})
                 # Attach only observes this externally managed server.
                 previous = os.environ.get('HONEYPRINT_TEST_ATTACH_KEY')
@@ -84,7 +93,11 @@ class OctoPrintIntegrationTests(unittest.TestCase):
                 ready.append(instance.instance_id)
                 stop_running(root)
             result = app.run(on_ready=on_ready)
-            self.assertEqual(ready, ['octo_01'])
+            camera_ports = [item[1] for item in ready if isinstance(item, tuple)]
+            self.assertIn('octo_01', ready)
+            for camera_port in camera_ports:
+                with socket.socket() as check:
+                    self.assertNotEqual(check.connect_ex(('127.0.0.1', camera_port)), 0)
             self.assertEqual(result['telemetry']['pending'], 0)
             self.assertFalse((root / 'control.json').exists())
             with SQLiteStorage(root / 'events.sqlite3') as storage:
