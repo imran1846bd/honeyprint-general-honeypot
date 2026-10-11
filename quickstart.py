@@ -1,5 +1,6 @@
 """Start the local framework, alert watcher and evidence dashboard together."""
 import argparse
+import errno
 from contextlib import closing
 import http.client
 import json
@@ -146,8 +147,11 @@ def main(argv=None):
             if any(p.poll() is not None for p in children):raise RuntimeError('A local service stopped unexpectedly')
             if args.duration is not None and time.monotonic()-started>=args.duration:break
         return 0
-    except (OSError,ValueError,RuntimeError,sqlite3.Error,KeyError,ModuleNotFoundError):
-        print('Local startup failed. Check dependencies, configuration and the preceding service output.',file=sys.stderr)
+    except (OSError,ValueError,RuntimeError,sqlite3.Error,KeyError,ModuleNotFoundError) as error:
+        if isinstance(error, OSError) and error.errno == errno.EADDRINUSE:
+            print(f'Local startup failed: dashboard port {args.dashboard_port} is already in use. Stop the existing run with main.py stop --runtime-dir followed by your selected runtime directory, or change HONEYPRINT_DASHBOARD_PORT in .env.',file=sys.stderr)
+        else:
+            print(f'Local startup failed: {error}',file=sys.stderr)
         return 1
     finally:
         stop_children(children)
