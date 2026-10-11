@@ -102,6 +102,23 @@ def main(argv=None):
         from core.validator import validate_config
         validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
                            custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url))
+        # Diagnose a second launch before dependency preparation or child startup.
+        import fcntl
+        runtime_lock = args.runtime_dir / 'control.lock'
+        if runtime_lock.exists():
+            with runtime_lock.open('r') as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    raise RuntimeError('This runtime is already running. Stop it with Ctrl-C or main.py stop --runtime-dir ' + str(args.runtime_dir) + ' and wait for shutdown before changing platforms') from None
+        for instance in config['instances']:
+            web_port = instance['services'].get('web_port')
+            if instance['deployment'] == 'managed' and web_port:
+                with socket.socket() as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    try:probe.bind(('127.0.0.1', web_port))
+                    except OSError:
+                        raise RuntimeError(f'Honeypot port {web_port} is already in use. Stop the previous run or change HONEYPRINT_PORT') from None
         if args.no_bootstrap and (args.octoprint_source or args.klipper_source):
             raise ValueError('Local sources require bootstrap to verify their builds')
         if not args.no_bootstrap:
