@@ -1,4 +1,4 @@
-# Native backend on an isolated internal network; public API exposure is pending.
+# Isolated native backend with a bounded loopback JSON API bridge.
 schema_version: 1
 instances:
   - id: klipper_01
@@ -6,10 +6,11 @@ instances:
     deployment: managed
     printer_profile: ../profiles/virtual_lab.yaml
     simulation: avr_sim
-    services: {}
+    services:
+      web_port: 8082
     stages: []
 telemetry:
   backend: sqlite
-  capture_requests: false
+  capture_requests: true
   capture_commands: false
   capture_state_changes: true
