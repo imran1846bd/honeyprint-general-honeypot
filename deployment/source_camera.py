@@ -18,6 +18,7 @@ class SourceCamera:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             self.port = probe.getsockname()[1]
+        self.video = Path(source) / "simulated_uploaded_prusa.mp4"
         self.process = None
         self.log = None
 
@@ -29,11 +30,14 @@ class SourceCamera:
         self.log = (self.root / 'camera-console.log').open('ab')
         os.chmod(self.root / 'camera-console.log', 0o600)
         try:
+            command = [str(self.python), str(self.script), '--port', str(self.port)]
+            if self.video.is_file():
+                command.extend(['--video', str(self.video)])
             self.process = subprocess.Popen(
-                [str(self.python), str(self.script), '--port', str(self.port)],
+                command,
                 cwd=self.script.parent, stdin=subprocess.DEVNULL, stdout=self.log, stderr=self.log,
                 start_new_session=True)
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
                     raise RuntimeError('The source demo camera stopped during startup')
