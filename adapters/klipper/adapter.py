@@ -1,11 +1,12 @@
 """Managed upstream Klipper with real AVR firmware and passive state observations.
 
 The MCU and Moonraker remain on an internal Docker network. This adapter does
-not yet expose an attacker-facing HTTP/WebSocket service or capture its requests.
+expose WebSocket or general file uploads; its bounded JSON bridge captures requests.
 """
 import math
 import threading
 import time
+from adapters.klipper.http_bridge import create_bridge
 from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
 from deployment.klipper_environment import KlipperEnvironment, PINS
@@ -21,17 +22,17 @@ class KlipperAdapter(PlatformAdapter):
         self.stopped = threading.Event()
         self.observer = None
         self.observer_error = False
+        self.server = None
+        self.server_thread = None
 
     def capabilities(self):
         return {'deployment': ['managed'], 'simulators': ['avr_sim'],
-                'services': [], 'stages': list(STAGES),
+                'services': ['web_port'], 'stages': list(STAGES),
                 'recipes': {'managed': 'klipper_managed'}}
 
     def validate(self, cfg, context):
         if cfg['deployment'] != 'managed' or cfg['simulation'] != 'avr_sim':
             raise AdapterError('Klipper supports managed AVR simulation only')
-        if cfg['services']:
-            raise AdapterError('External Klipper services are not yet implemented')
         load_profile(cfg['printer_profile'])
         validate_stages(cfg.get('stages', ()))
 
@@ -47,6 +48,11 @@ class KlipperAdapter(PlatformAdapter):
         if self.environment is None:
             raise AdapterError('Klipper adapter has not been prepared')
         self.environment.start(self.profile)
+        try:
+            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: None)
+        except Exception:
+            self.environment.stop()
+            raise AdapterError("Klipper API bridge could not bind") from None
         return self.environment
 
     def health(self, instance):
@@ -75,6 +81,10 @@ class KlipperAdapter(PlatformAdapter):
     def observe(self, instance, sink):
         if instance is not self.environment or self.observer is not None:
             raise AdapterError('Invalid Klipper observation setup')
+        self.server.server_close()
+        self.server = create_bridge(instance, self.server.server_address[1], sink)
+        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.server_thread.start()
         def poll():
             previous = None
             while not self.stopped.is_set():
@@ -102,6 +112,12 @@ class KlipperAdapter(PlatformAdapter):
         if not owned_only or instance is not self.environment:
             raise AdapterError('Klipper cleanup requires its owned handle')
         self.stopped.set()
+        if self.server is not None:
+            if self.server_thread is not None:
+                self.server.shutdown()
+                self.server_thread.join(10)
+            self.server.server_close()
+            self.server = self.server_thread = None
         if self.observer:
             self.observer.join(10)
             if self.observer.is_alive():
