@@ -121,7 +121,7 @@ def create_bridge(environment,port,emit,*,artifacts=None,frontend=None):
                             size=int(self.headers.get('Content-Length','0'))
                             limit=MAX_UPLOAD if path=='/server/files/upload' else 65536
                             if not 0<=size<=limit:
-                                self.respond(413,b'{"error":"request too large"}');return
+                                raise OverflowError('Request exceeds limit')
                             body=self.rfile.read(size)
                             if len(body)!=size: raise ValueError('Incomplete body')
                             if path=='/server/files/upload':
@@ -145,6 +145,8 @@ def create_bridge(environment,port,emit,*,artifacts=None,frontend=None):
                             self.record({'source':'klipper','event_type':'file.artifact','action':'upload',
                                          'outcome':'accepted' if 200<=status<300 else 'rejected',
                                          'simulation':True,'metadata':artifact})
+            except OverflowError:
+                status=413;output=b'{"error":"request too large"}'
             except (ValueError,UnicodeError):
                 status=400;output=b'{"error":"invalid or unsupported data"}'
             except Exception:
