@@ -2,7 +2,7 @@
 
 HoneyPrint is a proposed configuration-driven framework for additive manufacturing (AM) honeypot research. This README follows the design in *HoneyPrint Academic Framework: OctoPrint, Klipper and Custom* and maps it to the current repository structure.
 
-**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Five manufacturing stages, simplified physical models and private G-code artifact retention are implemented for the custom example. A source-pinned upstream Klipper and Moonraker backend now runs compiled AVR firmware through SimulAVR, with verified MCU readiness, a bounded loopback JSON bridge, state observations and owned container cleanup. WebSocket exposure, Mainsail and general native file uploads remain pending. The architecture below remains the full target framework.
+**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Five manufacturing stages, simplified physical models and private G-code artifact retention are implemented for the custom example. A source-pinned upstream Klipper and Moonraker backend now runs compiled AVR firmware through SimulAVR, with verified MCU readiness, a bounded loopback JSON bridge, state observations and owned container cleanup. Pinned Mainsail assets, live native WebSocket subscriptions, command submission evidence and retained native G-code upload/download are implemented. Uploaded files can execute through Klipper virtual SD and report native print completion. The architecture below remains the full target framework.
 
 ## Run the local prototype
 
@@ -12,7 +12,7 @@ On macOS or Linux with Python 3.10 through 3.13 and a running Docker engine:
 ./run.sh
 ```
 
-The first run creates a repository-local `.venv` and installs the pinned core dependency. It prepares a separately pinned OctoPrint environment and builds the pinned Klipper image when needed. It starts OctoPrint at `http://127.0.0.1:8081`, the bounded Klipper JSON bridge at `http://127.0.0.1:8082`, the custom printer at `http://127.0.0.1:8083`, the incremental alert watcher and the evidence dashboard at `http://127.0.0.1:8090`. Ctrl-C stops the owned services. Internet access is needed for dependency installation; subsequent starts reuse the environment.
+The first run creates a repository-local `.venv` and installs the pinned core dependency. It prepares a separately pinned OctoPrint environment, builds the pinned Klipper image when needed, and downloads the pinned Mainsail release after verifying its SHA-256 hash. It starts OctoPrint at `http://127.0.0.1:8081`, Mainsail and the native Klipper API at `http://127.0.0.1:8082`, the custom printer at `http://127.0.0.1:8083`, the incremental alert watcher and the evidence dashboard at `http://127.0.0.1:8090`. Ctrl-C or `main.py stop --runtime-dir .honeyprint/quickstart` stops the owned services. Internet access is needed for dependency installation; subsequent starts reuse the environment.
 
 Use `./run.sh --duration 30` for a bounded run, or pass `--config`, `--runtime-dir` and `--dashboard-port` for another local setup. Existing standalone `main.py` commands remain available. `quickstart.py` waits for newly persisted lifecycle readiness events before starting analysis and checks the dashboard HTTP response before reporting local service readiness. A startup failure shuts down owned children and returns a nonzero exit code.
 
@@ -452,14 +452,18 @@ The transport follows Moonraker's official [HTTP API introduction](https://moonr
 
 The Docker image builds pinned Klipper, Moonraker and official SimulAVR sources, compiles Klipper for an ATmega644P simulated MCU and feeds heater-driven analog thermistor voltages into that MCU. Readiness verifies native Klippy connectivity, the compiled MCU revision, serial counters and temperature feedback. The MCU is a software emulator; homing uses explicit virtual coordinates, and the thermal model is simplified. Emulator execution speed is not calibrated physical printer timing.
 
-The container runs without root, capabilities, host device mounts or a Docker socket mount, with a read-only root, bounded temporary filesystems and CPU, memory, process and log limits. Its internal Docker network blocks external egress. A host loopback bridge forwards only selected JSON endpoints through Docker exec; it is not a full Moonraker proxy. Observed routes/status and native printer state enter the framework telemetry pipeline. Raw command arguments are omitted. WebSocket forwarding, Mainsail, general uploads and comprehensive command audit remain unfinished.
+The container runs without root, capabilities, host device mounts or a Docker socket mount, with a read-only root, bounded temporary filesystems and CPU, memory, process and log limits. Its internal Docker network blocks external egress. A concurrent loopback bridge serves verified Mainsail assets and forwards selected native HTTP and live WebSocket JSON-RPC endpoints through Docker exec. Native responses and status notifications originate from Moonraker. Host power/service control and software updates are excluded. Observed routes/status, RPC methods, submitted G-code identifiers and native printer state enter the framework telemetry pipeline; raw command arguments are omitted. Submission evidence does not prove every line of an uploaded file was executed.
+
+Native multipart uploads accept UTF-8 G-code files up to one MiB with simple filenames in the G-code root. The host retains content-addressed evidence before forwarding; successful uploads produce artifact metadata. The container's native G-code files are temporary and disappear on shutdown; retained host evidence survives. Configuration uploads and arbitrary executable files are rejected. Mainsail can upload, list and select G-code and start a native virtual-SD print, then receive live completion/status updates.
+
+Mainsail is pinned to release 2.19.0 with archive SHA-256 `c4d9d96f89851c6ae0709c2f20725447f3fe8c57cf193869b0083441bd93378a`. Bootstrap verifies the archive, limits extraction and rejects unsafe paths. Cached file hashes are checked before serving. The official [Mainsail configuration reference](https://github.com/mainsail-crew/mainsail/blob/master/public/config.json) and [Moonraker file API](https://moonraker.readthedocs.io/en/latest/external_api/file_manager/) describe the native interfaces.
 
 ```bash
 ./run.sh --config configs/instances/klipper.yaml
 HONEYPRINT_TEST_KLIPPER=1 .venv/bin/python -m unittest discover -s tests -p test_klipper_runtime.py -v
 ```
 
-The real Docker integration test verifies native movement, MCU communication, blocked egress, request/state observations, owned cleanup and restart. Containers and networks use unique ownership labels; cleanup refuses resources with a different owner.
+Real Docker integration tests verify native movement, MCU communication, blocked egress, request/state observations, owned cleanup and restart. Frontend integration verifies served Mainsail assets/configuration, simultaneous WebSocket RPC replies, status subscriptions, upload/download integrity, artifact retention, native print completion and cleanup with an open connection. Browser visual inspection requires local computer-use permissions; automated verification exercises the native interfaces directly. Containers and networks use unique ownership labels; cleanup refuses resources with a different owner.
 
 ## Implementation sequence
 
@@ -467,10 +471,10 @@ The real Docker integration test verifies native movement, MCU communication, bl
 2. Implemented: dependency planning, resource ownership, lifecycle and health reporting.
 3. Implemented: pinned local OctoPrint recipe, Virtual Printer integration and audit bridge.
 4. Implemented: normalized telemetry, SQLite persistence and event readback.
-5. Implemented: managed upstream Klipper, Moonraker and AVR MCU simulation with bounded JSON exposure and state capture. Full frontend/protocol coverage remains pending.
-6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. The custom example now runs ordered manufacturing-stage plugins and simplified motion, thermal, extrusion and sensor simulation. OctoPrint and custom runtimes can use the shared shadow manufacturing service; native platform job execution and complete Klipper frontend/protocol coverage remain separate work.
+5. Implemented: managed upstream Klipper, Moonraker, AVR MCU simulation, pinned Mainsail, bounded native HTTP/upload/download and live WebSocket subscriptions.
+6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. The custom example now runs ordered manufacturing-stage plugins and simplified motion, thermal, extrusion and sensor simulation. OctoPrint and custom runtimes can use the shared shadow manufacturing service; native platform job execution and optional additional protocols and full execution auditing remain separate work.
 7. Implemented for this prototype: contract tests and real OctoPrint attach, persistence, shutdown and restart checks. Extend coverage as further platforms are added.
 
 ## License and citation
 
-No license or citation file has been added yet. License selection and author/publication details remain to be documented. Third-party OctoPrint, Klipper, Moonraker and Mainsail source code is not included.
+No license or citation file has been added yet. License selection and author/publication details remain to be documented. Third-party source code and Mainsail release assets are downloaded into local runtime/image caches, rather than committed to this repository.
