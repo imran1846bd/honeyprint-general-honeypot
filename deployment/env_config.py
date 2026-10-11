@@ -10,7 +10,7 @@ KEYS={'HONEYPRINT_PLATFORM','HONEYPRINT_PORT','HONEYPRINT_DASHBOARD_PORT','HONEY
       'HONEYPRINT_WIDTH','HONEYPRINT_DEPTH','HONEYPRINT_HEIGHT','HONEYPRINT_NOZZLE',
       'HONEYPRINT_HEATED_BED','HONEYPRINT_RUNTIME_DIR','HONEYPRINT_OCTOPRINT_PYTHON',
       'HONEYPRINT_CUSTOM_CODE','HONEYPRINT_CUSTOM_PYTHON','HONEYPRINT_CUSTOM_HEALTH_PATH',
-      'HONEYPRINT_INSTANCE_ID','HONEYPRINT_OCTOPRINT_SOURCE','HONEYPRINT_KLIPPER_SOURCE'}
+      'HONEYPRINT_CUSTOM_API_URL','HONEYPRINT_ANALYST_ENABLED','HONEYPRINT_INSTANCE_ID','HONEYPRINT_OCTOPRINT_SOURCE','HONEYPRINT_KLIPPER_SOURCE'}
 
 
 def read_env(path):
@@ -52,7 +52,7 @@ def build_config(values,base,output):
         value=values.get(key,'') or default
         if value is None:return None
         p=Path(value).expanduser();return p.absolute() if p.is_absolute() else (base/p).absolute()
-    platform=values.get('HONEYPRINT_PLATFORM','all').strip().lower()
+    platform=values.get('HONEYPRINT_PLATFORM','octoprint').strip().lower()
     names={'octoprint':'octoprint','klipper':'klipper','custom':'custom'}
     if platform not in (*names,'all'):raise ValueError('HONEYPRINT_PLATFORM must be all, octoprint, klipper or custom')
     config=load_config(ROOT/'configs/instances/all.yaml' if platform=='all' else ROOT/f'configs/instances/{names[platform]}.yaml')
@@ -68,14 +68,22 @@ def build_config(values,base,output):
     load_profile(profile_path)
     if platform=='all' and (values.get('HONEYPRINT_PORT') or values.get('HONEYPRINT_INSTANCE_ID')):
         raise ValueError('A single port or instance ID requires selection of one platform')
+    if values.get('HONEYPRINT_CUSTOM_CODE') and values.get('HONEYPRINT_CUSTOM_API_URL'):
+        raise ValueError('Choose a custom code path or API URL, not both')
+    analyst = values.get('HONEYPRINT_ANALYST_ENABLED', 'false').lower()
+    if analyst not in ('true', 'false'):raise ValueError('HONEYPRINT_ANALYST_ENABLED must be true or false')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
         if values.get('HONEYPRINT_INSTANCE_ID'):instance['id']=values['HONEYPRINT_INSTANCE_ID']
-        if values.get('HONEYPRINT_PORT'):instance['services']['web_port']=port(values['HONEYPRINT_PORT'],8083)
+        if platform != 'all':instance['services']['web_port']=port(values.get('HONEYPRINT_PORT'),8081)
         if instance['platform']=='custom_lab' and values.get('HONEYPRINT_CUSTOM_CODE'):
             entry=path('HONEYPRINT_CUSTOM_CODE')
             if not entry.is_file() or entry.suffix!='.py':raise ValueError('Custom code must select an existing Python entry file')
             instance['platform']='custom';instance['simulation']='custom_process';instance['stages']=[]
+        if instance['platform']=='custom_lab' and values.get('HONEYPRINT_CUSTOM_API_URL'):
+            from adapters.custom.api_adapter import parse_api_url
+            parse_api_url(values['HONEYPRINT_CUSTOM_API_URL'])
+            instance.update(platform='custom', deployment='attach', simulation='custom_api', stages=[])
     config_path=output/'config.yaml';config_path.write_text(yaml.safe_dump(config,sort_keys=False))
     return {'config':config,'config_path':config_path,
             'runtime_dir':path('HONEYPRINT_RUNTIME_DIR',str(ROOT/'.honeyprint/quickstart')),
@@ -83,6 +91,8 @@ def build_config(values,base,output):
             'octoprint_python':path('HONEYPRINT_OCTOPRINT_PYTHON'),
             'octoprint_source':path('HONEYPRINT_OCTOPRINT_SOURCE') if platform in ('all','octoprint') else None,
             'klipper_source':path('HONEYPRINT_KLIPPER_SOURCE') if platform in ('all','klipper') else None,
-            'custom_code':path('HONEYPRINT_CUSTOM_CODE'),
+            'analyst_enabled':analyst == 'true',
+            'custom_api_url':values.get('HONEYPRINT_CUSTOM_API_URL') if platform in ('all','custom') else None,
+            'custom_code':path('HONEYPRINT_CUSTOM_CODE') if platform in ('all','custom') else None,
             'custom_python':path('HONEYPRINT_CUSTOM_PYTHON'),
             'custom_health_path':values.get('HONEYPRINT_CUSTOM_HEALTH_PATH') or '/'}
