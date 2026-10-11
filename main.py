@@ -25,6 +25,9 @@ def main(argv: Optional[Sequence[str]] = None, *,
         command.add_argument('--runtime-dir', type=Path, default=Path('.honeyprint'))
         command.add_argument('--octoprint-python', type=Path,
                              help='Interpreter with requirements-octoprint.txt installed')
+        command.add_argument('--custom-code', type=Path, help='Trusted Python HTTP honeypot entry file')
+        command.add_argument('--custom-python', type=Path)
+        command.add_argument('--custom-health-path', default='/')
         command.add_argument('--attach-api-key-env', help='Environment variable containing the external API key')
         if name == 'run':
             command.add_argument('--duration', type=float, help='Stop after this many ready-runtime seconds')
@@ -44,7 +47,8 @@ def main(argv: Optional[Sequence[str]] = None, *,
         config = load_config(config_path)
         active_registry = registry if registry is not None else create_builtin_registry(
             runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
-            attach_api_key_env=args.attach_api_key_env,
+            attach_api_key_env=args.attach_api_key_env, custom_code=args.custom_code,
+            custom_python=args.custom_python, custom_health_path=args.custom_health_path,
         )
         validate_config(config, active_registry)
         if args.command == 'validate':
