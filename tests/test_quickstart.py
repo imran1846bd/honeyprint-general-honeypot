@@ -1,4 +1,5 @@
 """Real subprocess startup, restart, interruption and occupied-port behaviour."""
+from contextlib import closing
 import json
 from pathlib import Path
 import signal
@@ -56,7 +57,7 @@ telemetry:
                 self.assertEqual(result.returncode,0,result.stdout+result.stderr)
                 self.assertIn('Local services ready',result.stdout)
                 self.assert_closed(ports)
-            with sqlite3.connect(root/'runtime/events.sqlite3') as connection:
+            with closing(sqlite3.connect(root/'runtime/events.sqlite3')) as connection:
                 events=[json.loads(row[0]) for row in connection.execute('SELECT payload FROM events')]
             self.assertEqual(sum(event['event_type']=='framework.lifecycle' and event['action']=='start' for event in events),2)
             self.assertEqual(sum(event['event_type']=='framework.lifecycle' and event['action']=='stop' for event in events),2)
