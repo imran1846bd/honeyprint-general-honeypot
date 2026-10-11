@@ -68,7 +68,7 @@ These are manufacturing lifecycle stages, not technical architecture layers. A d
 
 ## 3. Common configuration and build procedure
 
-The examples in the design sections illustrate the full target framework. For the implemented prototype, use `configs/instances/octoprint.yaml` and `configs/profiles/virtual_lab.yaml`; its stage list is empty because OctoPrint is not yet connected to the custom simulation pipeline. The custom instance enables the implemented five-stage sequence. Profile paths resolve relative to the selected configuration file.
+The examples in the design sections illustrate the full target framework. For the implemented prototype, use `configs/instances/octoprint.yaml` and `configs/profiles/virtual_lab.yaml`; its stage list is empty because OctoPrint stages are optional and default to disabled. Enabled stages use the shared shadow simulation service rather than submitting native OctoPrint jobs. The custom instance enables the implemented five-stage sequence. Profile paths resolve relative to the selected configuration file.
 
 ```yaml
 schema_version: 1
@@ -240,6 +240,7 @@ honeyprint-general-honeypot/
 │   ├── event_bus.py
 │   ├── instance_builder.py
 │   ├── lifecycle_manager.py
+│   ├── manufacturing_service.py
 │   ├── plugin_registry.py
 │   ├── profile_loader.py
 │   ├── runtime.py
@@ -289,6 +290,7 @@ honeyprint-general-honeypot/
 ├── tests/
 │   ├── test_artifact_storage.py
 │   ├── test_manufacturing_simulation.py
+│   ├── test_manufacturing_service.py
 │   ├── test_moonraker_client.py
 │   ├── test_extensions_and_analysis.py
 │   ├── test_lifecycle.py
@@ -414,6 +416,14 @@ The dashboard listens at `http://127.0.0.1:8090`, supports instance/type filters
 
 For ongoing local notifications, run the analysis command with `--watch` alongside the framework. Findings cover denied API access, unknown endpoints, emergency-stop commands, rejected commands and platform interruptions. They are contextual indicators, not confirmed attacks. Checkpoints and deterministic finding IDs prevent duplicate results on restart. No email, messaging service or ML classifier is configured.
 
+### Shared manufacturing service
+
+When an instance enables an ordered stage sequence, `FrameworkRuntime` exposes `instance.resources["manufacturing"]`. Trusted startup code can call its `submit(gcode_bytes)` method from `on_ready(instance, report)` or its own integration layer. Selected stage providers come from the immutable dependency plan, so registered providers are used instead of silently selecting built-in functions. Artifact storage and normalized stage evidence are shared across platforms.
+
+This service executes a **shadow simulation**. It does not send commands to OctoPrint, Klipper or physical hardware. The service reports `execution_mode: shadow`, retains accepted G-code artifacts and closes before runtime telemetry cleanup. If an evidence sink rejects a stage, simulated state remains unchanged and further submissions fail until a new service is created; already accepted evidence is not rolled back. The custom `/api/job` endpoint retains its own simulated printer state and job pipeline.
+
+The test suite runs shadow jobs on both the real pinned OctoPrint runtime and the custom HTTP runtime, checks platform-tagged SQLite evidence and rejects submissions after shutdown. There is no public HTTP endpoint for the shared service yet; it is a trusted Python integration API.
+
 ### Moonraker read-only transport
 
 `adapters.klipper.moonraker_client.MoonrakerClient` can inspect an existing loopback Moonraker port or a user-managed SSH tunnel. It uses bounded GET requests for server, printer and selected object status, optionally checking explicit Klipper/Moonraker version strings and reading an API key from an environment variable. It sends no printer commands and omits server paths and credentials from returned evidence. Its tests use an HTTP protocol fixture; real Klipper integration remains unverified. This helper is not registered as a runnable Klipper adapter and does not establish MCU simulation.
@@ -431,7 +441,7 @@ Klipper/Moonraker/Mainsail integration is not enabled. This environment has a Do
 3. Implemented: pinned local OctoPrint recipe, Virtual Printer integration and audit bridge.
 4. Implemented: normalized telemetry, SQLite persistence and event readback.
 5. Implement Klipper integration only with a validated MCU simulation backend.
-6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. The custom example now runs ordered manufacturing-stage plugins and simplified motion, thermal, extrusion and sensor simulation. These plugins are not yet connected to OctoPrint or Klipper.
+6. Implemented: custom adapter example, versioned SDK, read-only analysis, contextual rules and local alerts. The custom example now runs ordered manufacturing-stage plugins and simplified motion, thermal, extrusion and sensor simulation. OctoPrint and custom runtimes can use the shared shadow manufacturing service; native platform job execution and Klipper integration remain separate work.
 7. Implemented for this prototype: contract tests and real OctoPrint attach, persistence, shutdown and restart checks. Extend coverage as further platforms are added.
 
 ## License and citation
