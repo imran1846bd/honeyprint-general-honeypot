@@ -64,6 +64,8 @@ def main(argv=None):
     parser.add_argument('--runtime-dir',type=Path)
     parser.add_argument('--dashboard-port',type=int)
     parser.add_argument('--octoprint-python',type=Path)
+    parser.add_argument('--octoprint-source',type=Path)
+    parser.add_argument('--klipper-source',type=Path)
     parser.add_argument('--attach-api-key-env')
     parser.add_argument('--no-bootstrap',action='store_true',help='Use already installed platform dependencies')
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
@@ -76,7 +78,7 @@ def main(argv=None):
             generated=tempfile.TemporaryDirectory(prefix='env-',dir=folder)
             selected=build_config(read_env(args.env_file),args.env_file.absolute().parent,Path(generated.name))
             args.config=selected['config_path']
-            for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path'):
+            for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path','octoprint_source','klipper_source'):
                 if getattr(args,field) is None:setattr(args,field,selected[field])
         args.runtime_dir=args.runtime_dir or ROOT/'.honeyprint/quickstart'
         args.dashboard_port=args.dashboard_port or 8090
@@ -96,9 +98,11 @@ def main(argv=None):
         from core.validator import validate_config
         validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
                            custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path))
+        if args.no_bootstrap and (args.octoprint_source or args.klipper_source):
+            raise ValueError('Local sources require bootstrap to verify their builds')
         if not args.no_bootstrap:
             from deployment.bootstrap import install_selected
-            args.octoprint_python = install_selected(config, args.octoprint_python)
+            args.octoprint_python = install_selected(config, args.octoprint_python, octoprint_source=args.octoprint_source, klipper_source=args.klipper_source)
         expected={instance['id'] for instance in config['instances']}
         if not expected:raise ValueError('No configured instances')
         if any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
