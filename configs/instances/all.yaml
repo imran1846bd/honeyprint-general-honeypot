@@ -16,6 +16,8 @@ instances:
     state: true
 - id: klipper_01
   platform: klipper
+  frontend: mainsail
+  api: moonraker
   deployment: managed
   printer_profile: ../profiles/virtual_lab.yaml
   simulation: avr_sim
