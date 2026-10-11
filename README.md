@@ -6,7 +6,7 @@ HoneyPrint is a proposed configuration-driven framework for additive manufacturi
 
 ## Run the local prototype
 
-On macOS or Linux with Python 3.10 through 3.13 and a running Docker engine:
+On macOS or Linux, select the platform in `.env` and run with Python 3.10 through 3.13. Klipper selection additionally requires a running Docker engine:
 
 ```bash
 ./run.sh
@@ -16,11 +16,48 @@ The first run creates a repository-local `.venv` and installs the pinned core de
 
 Use `./run.sh --duration 30` for a bounded run, or pass `--config`, `--runtime-dir` and `--dashboard-port` for another local setup. Existing standalone `main.py` commands remain available. `quickstart.py` waits for newly persisted lifecycle readiness events before starting analysis and checks the dashboard HTTP response before reporting local service readiness. A startup failure shuts down owned children and returns a nonzero exit code.
 
-Docker must already be installed and running. The default launches all three supported backends; image compilation can take several minutes. Use `./run.sh --config configs/instances/custom.yaml` for the custom backend alone. `--no-bootstrap` requires existing dependencies, and `--octoprint-python` selects an existing interpreter. To run OctoPrint alone, use:
+Docker must already be installed and running. The default env template selects all three supported backends; image compilation can take several minutes. Use `./run.sh --config configs/instances/custom.yaml` for the custom backend alone. `--no-bootstrap` requires existing dependencies, and `--octoprint-python` selects an existing interpreter. To run OctoPrint alone, use:
 
 ```bash
 ./run.sh --config configs/instances/octoprint.yaml --octoprint-python /absolute/path/to/octoprint-python
 ```
+
+## Select your honeypot using .env
+
+Copy `.env.example` to `.env` once, then edit its variables and run the same command:
+
+```bash
+cp .env.example .env
+./run.sh
+```
+
+| Env selection | Runtime selected automatically |
+| --- | --- |
+| `HONEYPRINT_PLATFORM=octoprint` | OctoPrint with its Virtual Printer and audit capture |
+| `HONEYPRINT_PLATFORM=klipper` | Klipper AVR simulation, Moonraker and Mainsail |
+| `HONEYPRINT_PLATFORM=custom` with blank custom code | Built-in custom printer lab |
+| `HONEYPRINT_PLATFORM=custom` with a custom code path | Your trusted Python HTTP honeypot |
+| `HONEYPRINT_PLATFORM=all` | All three configured platform families together |
+
+The launcher selects compatible simulator, recipe and frontend identifiers. `HONEYPRINT_PORT` overrides one platform's exposed port; leave it blank for `all`. `HONEYPRINT_DASHBOARD_PORT`, `HONEYPRINT_RUNTIME_DIR` and `HONEYPRINT_INSTANCE_ID` control the dashboard, evidence location and single instance identity. Optional `HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated profile values without editing YAML. Blank values preserve profile defaults.
+
+For your own code, edit only these selections:
+
+```dotenv
+HONEYPRINT_PLATFORM=custom
+HONEYPRINT_CUSTOM_CODE=examples/custom_server.py
+HONEYPRINT_PORT=8083
+HONEYPRINT_DASHBOARD_PORT=8090
+HONEYPRINT_WIDTH=300
+```
+
+Replace the code path with your entry file. Relative paths resolve from the env file's directory. Optional `HONEYPRINT_CUSTOM_PYTHON` selects an interpreter with your dependencies already installed; `HONEYPRINT_CUSTOM_HEALTH_PATH` defaults to `/`. The example is a runnable developer-owned server, separate from the built-in custom lab.
+
+Your Python server must bind `HONEYPRINT_HOST` and `HONEYPRINT_PORT` supplied by the framework, and return a successful health response with `X-HoneyPrint-Instance` equal to the supplied `HONEYPRINT_INSTANCE_TOKEN`. The framework also supplies the selected profile as `HONEYPRINT_PROFILE_JSON`. Keep worker processes in the owned process group so shutdown can clean them up. These small interface requirements let the framework verify readiness and proxy native HTTP behavior without requiring a platform adapter or registry changes. They do not automatically convert arbitrary scripts into printer emulators. Custom code executes as trusted local developer code; this launcher does not sandbox it or install its dependencies.
+
+The proxy captures request methods/status without bodies, credentials or command arguments. Custom stdout/stderr remains in a private bounded `custom.log` under the instance runtime directory. Advanced SDK adapters remain available for richer simulator, manufacturing and platform-specific observation contracts.
+
+`.env` is a literal settings file, never sourced as a shell script. Unknown and duplicate keys are rejected. Process environment values override file values; explicit CLI settings override generated defaults. `--env-file /path/to/settings.env` selects another file, and `--config /path/to/config.yaml` preserves explicit YAML startup. Restart the running framework after changing settings; use Ctrl-C, or `main.py stop --runtime-dir` with your selected runtime directory, before launching its replacement. Env files remain local and are excluded from Git.
 
 ## 1. Research objective and design boundaries
 
@@ -419,7 +456,7 @@ register_extension(registry, {
 main(registry=registry)
 ```
 
-`MyAdapter` must be imported by your trusted startup code and implement the platform contract. The manifest preflights version, identifiers and collisions before registration. Factories are not executed during registration. There is no automatic code upload/import endpoint or sandbox for arbitrary Python packages.
+`MyAdapter` must be imported by your trusted startup code and implement the platform contract. The manifest preflights version, identifiers and collisions before registration. Factories are not executed during registration. The `.env` custom entry path now supports an owned local HTTP server without SDK registration. There is no network code-upload/import endpoint or sandbox for arbitrary Python packages.
 
 ### Explore evidence and local rule alerts
 
