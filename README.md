@@ -59,6 +59,23 @@ The proxy captures request methods/status without bodies, credentials or command
 
 `.env` is a literal settings file, never sourced as a shell script. Unknown and duplicate keys are rejected. Process environment values override file values; explicit CLI settings override generated defaults. `--env-file /path/to/settings.env` selects another file, and `--config /path/to/config.yaml` preserves explicit YAML startup. Restart the running framework after changing settings; use Ctrl-C, or `main.py stop --runtime-dir` with your selected runtime directory, before launching its replacement. Env files remain local and are excluded from Git.
 
+## Use your local platform source
+
+The same launcher can build trusted local OctoPrint and Klipper source folders. For the folders supplied with this project, set:
+
+```dotenv
+HONEYPRINT_PLATFORM=all
+HONEYPRINT_OCTOPRINT_SOURCE="/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/OctoPrint-dev 2"
+HONEYPRINT_KLIPPER_SOURCE=/Users/macairm3/Desktop/HoneyPrintGeneralFramwork/plat/klipper-master
+HONEYPRINT_OCTOPRINT_PYTHON=
+```
+
+Run `./run.sh`. Change only `HONEYPRINT_PLATFORM` to `octoprint`, `klipper` or `custom` when running one platform; env source paths for other platforms are ignored. Relative source paths resolve from the env file's directory. `--octoprint-source` and `--klipper-source` also accept source folders. Source selection requires bootstrap; it cannot be combined with `--no-bootstrap`.
+
+HoneyPrint hashes and copies the source into `.honeyprint/local-sources`, preserving the original folder. OctoPrint is installed into a separate environment using that source's declared dependencies. Klipper is compiled together with its host software into a separate Docker image, retaining the pinned Moonraker and SimulAVR components and the existing isolated runtime. Archive downloads receive a local snapshot Git commit so native MCU readiness can verify the compiled revision; this is not an upstream commit identifier. Selected source hashes are recorded in deployment recipe metadata. A source change produces a new cache identity on the next launch.
+
+Initial builds require internet access and may take several minutes. These are trusted developer sources: Python package installation and Docker builds execute their build instructions. The downloaded OctoPrint development version has different dependencies from the pinned release, so the two environments remain separate. Existing supported simulator, telemetry and dashboard behavior still needs runtime compatibility with each selected source version; arbitrary platform forks are not guaranteed to work.
+
 ## 1. Research objective and design boundaries
 
 One shared framework should instantiate supported platform implementations through registered adapters. Reusable responsibilities include schema validation, capability checking, instance identity, lifecycle management, normalized telemetry, persistent evidence storage and a read-only analysis dashboard. Platform adapters are responsible for preparing, starting or attaching to, and observing their software.
