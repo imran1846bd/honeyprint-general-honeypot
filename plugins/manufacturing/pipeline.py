@@ -17,14 +17,17 @@ def validate_stages(stages):
     return stages
 
 
-def run_job(content, simulator, stages, *, name='job.gcode'):
+def run_job(content, simulator, stages, *, name='job.gcode', factories=None):
     stages = validate_stages(stages)
     if not stages: raise ValueError('Manufacturing stages are disabled')
+    providers = dict(FACTORIES if factories is None else factories)
+    if any(stage not in providers or not callable(providers[stage]) for stage in stages):
+        raise ValueError('Every selected stage requires a registered callable')
     candidate = deepcopy(simulator)
-    result = job_intake(content, name=name)
+    result = providers['job_intake'](content, name=name)
     events = [{'stage': 'job_intake', 'outcome': 'completed'}]
     for stage in stages[1:]:
-        result = FACTORIES[stage](result, candidate)
+        result = providers[stage](result, candidate)
         outcome = 'completed'
         if stage == 'inspection' and not result['inspection']['passed']: outcome = 'failed'
         events.append({'stage': stage, 'outcome': outcome})
