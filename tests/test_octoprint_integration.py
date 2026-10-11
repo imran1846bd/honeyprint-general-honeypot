@@ -6,6 +6,7 @@ lockfile. Tests allocate local ports, use temporary roots and stop owned servers
 
 from copy import deepcopy
 import os
+import json
 from pathlib import Path
 import socket
 from tempfile import TemporaryDirectory
@@ -43,6 +44,20 @@ class OctoPrintIntegrationTests(unittest.TestCase):
             def on_ready(instance, report):
                 self.assertTrue(report['ready']); self.assertTrue(instance.owns_platform_resources)
                 handle = instance.resources['platform_handle']
+                import urllib.request
+                from http.cookiejar import CookieJar
+                cookies = CookieJar()
+                browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+                with browser.open(f'http://127.0.0.1:{port}/', timeout=5) as page:
+                    page.read()
+                token = next(c.value for c in cookies if c.name.startswith('csrf_token'))
+                credentials = json.loads((root / 'octo_01/credentials.json').read_text())
+                self.assertEqual((credentials['username'], credentials['password']), ('admin', 'admin'))
+                login = urllib.request.Request(f'http://127.0.0.1:{port}/api/login',
+                    data=json.dumps({'user': 'admin', 'pass': 'admin'}).encode(),
+                    headers={'Content-Type': 'application/json', 'X-CSRF-Token': token})
+                with browser.open(login, timeout=5) as response:
+                    self.assertEqual(json.loads(response.read())['name'], 'admin')
                 api_request(handle, 'POST', '/api/printer/command', {'command': 'M105'})
                 # Attach only observes this externally managed server.
                 previous = os.environ.get('HONEYPRINT_TEST_ATTACH_KEY')
