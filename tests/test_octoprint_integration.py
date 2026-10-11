@@ -67,6 +67,8 @@ class OctoPrintIntegrationTests(unittest.TestCase):
                     self.assertEqual(camera_settings['snapshot'], camera.settings()['snapshot'])
                     with urllib.request.urlopen(camera_settings['snapshot'], timeout=5) as response:
                         self.assertTrue(response.read().startswith(b'\xff\xd8'))
+                    if camera.video.is_file():
+                        self.assertIn('Loaded ', (camera.root / 'camera-console.log').read_text())
                     ready.append(('camera', camera.port))
                 api_request(handle, 'POST', '/api/printer/command', {'command': 'M105'})
                 # Attach only observes this externally managed server.
