@@ -81,7 +81,7 @@ def validate_rpc(message):
             raise ValueError('Prints require a retained G-code filename')
     if method.startswith('server.files.') and method not in ('server.files.list','server.files.metadata'):
         for key in ('path','source','dest'):
-            if key in params and (not isinstance(params[key],str) or not params[key].startswith('gcodes/') or '..' in params[key].split('/')):
+            if key in params and (not isinstance(params[key],str) or not (params[key].startswith('gcodes/') or (method=='server.files.get_directory' and params[key]=='gcodes')) or '..' in params[key].split('/')):
                 raise ValueError('File operations are limited to G-code storage')
     if method.startswith('server.database.') and method not in ('server.database.list','server.database.get_item'):
         if params.get('namespace') not in ('mainsail','webcams'): raise ValueError('Protected database namespace')
