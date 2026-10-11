@@ -14,7 +14,7 @@ from adapters.base_adapter import AdapterError
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '.honeyprint/local-sources'
-IGNORED = {'.git', '.venv', '__pycache__', '.pytest_cache', 'build', 'dist', 'out', '.tox'}
+IGNORED = {'.git', '.venv', 'venv', '.push-work', '__pycache__', '.pytest_cache', 'build', 'dist', 'out', '.tox'}
 
 
 def snapshot(source, platform):
@@ -29,6 +29,8 @@ def snapshot(source, platform):
         if any((Path(directory) / d).is_symlink() for d in dirs):
             raise AdapterError('Local source snapshots do not accept symbolic links')
         for name in sorted(names):
+            if name == '.DS_Store' or name.startswith('activity.sqlite3'):
+                continue
             path = Path(directory) / name
             if path.is_symlink() or not path.is_file():
                 raise AdapterError('Local source snapshots require regular files')
@@ -77,6 +79,7 @@ def prepare_sources(platforms, octoprint_source, klipper_source, python=None):
             metadata = json.loads(marker.read_text())
             os.environ['_HONEYPRINT_OCTOPRINT_VERSION'] = metadata['version']
             os.environ['_HONEYPRINT_OCTOPRINT_SOURCE_SHA256'] = digest
+            os.environ['_HONEYPRINT_OCTOPRINT_SOURCE_DIR'] = str(source)
         if klipper_source:
             source, digest = snapshot(klipper_source, 'klipper')
             # Archive downloads lack Git metadata; an owned deterministic commit
