@@ -1,1 +1,15 @@
-# Structure placeholder; implementation pending.
+# Native backend on an isolated internal network; public API exposure is pending.
+schema_version: 1
+instances:
+  - id: klipper_01
+    platform: klipper
+    deployment: managed
+    printer_profile: ../profiles/virtual_lab.yaml
+    simulation: avr_sim
+    services: {}
+    stages: []
+telemetry:
+  backend: sqlite
+  capture_requests: false
+  capture_commands: false
+  capture_state_changes: true
