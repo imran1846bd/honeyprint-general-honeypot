@@ -53,6 +53,7 @@ class OctoPrintIntegrationTests(unittest.TestCase):
                 token = next(c.value for c in cookies if c.name.startswith('csrf_token'))
                 credentials = json.loads((root / 'octo_01/credentials.json').read_text())
                 self.assertEqual((credentials['username'], credentials['password']), ('admin', 'admin'))
+                self.assertFalse(api_request(handle, 'GET', '/api/setup/wizard')['tracking']['required'])
                 login = urllib.request.Request(f'http://127.0.0.1:{port}/api/login',
                     data=json.dumps({'user': 'admin', 'pass': 'admin'}).encode(),
                     headers={'Content-Type': 'application/json', 'X-CSRF-Token': token})
