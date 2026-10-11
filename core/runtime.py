@@ -44,7 +44,7 @@ class FrameworkRuntime:
         sink = self.bus.sink(instance_id=instance_id, platform=platform)
         flags = self.config['telemetry']
         def capture(event):
-            category = ('capture_requests' if event.get('event_type') == 'http.request'
+            category = ('capture_requests' if event.get('event_type') in ('http.request', 'api.request')
                         else 'capture_commands' if event.get('event_type') == 'printer.command'
                         else 'capture_state_changes')
             return sink(event) if flags[category] else True
