@@ -10,7 +10,7 @@ KEYS={'HONEYPRINT_PLATFORM','HONEYPRINT_PORT','HONEYPRINT_DASHBOARD_PORT','HONEY
       'HONEYPRINT_WIDTH','HONEYPRINT_DEPTH','HONEYPRINT_HEIGHT','HONEYPRINT_NOZZLE',
       'HONEYPRINT_HEATED_BED','HONEYPRINT_RUNTIME_DIR','HONEYPRINT_OCTOPRINT_PYTHON',
       'HONEYPRINT_CUSTOM_CODE','HONEYPRINT_CUSTOM_PYTHON','HONEYPRINT_CUSTOM_HEALTH_PATH',
-      'HONEYPRINT_INSTANCE_ID'}
+      'HONEYPRINT_INSTANCE_ID','HONEYPRINT_OCTOPRINT_SOURCE','HONEYPRINT_KLIPPER_SOURCE'}
 
 
 def read_env(path):
@@ -81,6 +81,8 @@ def build_config(values,base,output):
             'runtime_dir':path('HONEYPRINT_RUNTIME_DIR',str(ROOT/'.honeyprint/quickstart')),
             'dashboard_port':port(values.get('HONEYPRINT_DASHBOARD_PORT'),8090),
             'octoprint_python':path('HONEYPRINT_OCTOPRINT_PYTHON'),
+            'octoprint_source':path('HONEYPRINT_OCTOPRINT_SOURCE') if platform in ('all','octoprint') else None,
+            'klipper_source':path('HONEYPRINT_KLIPPER_SOURCE') if platform in ('all','klipper') else None,
             'custom_code':path('HONEYPRINT_CUSTOM_CODE'),
             'custom_python':path('HONEYPRINT_CUSTOM_PYTHON'),
             'custom_health_path':values.get('HONEYPRINT_CUSTOM_HEALTH_PATH') or '/'}
