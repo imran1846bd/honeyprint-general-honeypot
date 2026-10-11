@@ -3,6 +3,9 @@
 from pathlib import Path
 
 from adapters.octoprint.adapter import OctoPrintAdapter
+from adapters.klipper.adapter import KlipperAdapter
+from recipes.klipper import managed_recipe as klipper_recipe
+from deployment.klipper_environment import PINS
 from adapters.custom.lab_adapter import LabAdapter
 from sdk.extensions import register_extension
 from core.plugin_registry import PluginRegistry
@@ -20,6 +23,11 @@ def create_builtin_registry(*, runtime_dir: Path, octoprint_python: Path | None 
     startup code can register further adapters/providers on this same registry.
     """
     registry = PluginRegistry()
+    registry.register("platform_adapter", "klipper", KlipperAdapter)
+    registry.register("deployment_recipe", "klipper_managed", klipper_recipe)
+    registry.register("simulator", "avr_sim", lambda: {
+        "provider": "simulavr", "version": PINS["simulavr"],
+    })
     registry.register('platform_adapter', 'octoprint', lambda: OctoPrintAdapter(
         runtime_dir=runtime_dir, python=octoprint_python,
         attach_api_key_env=attach_api_key_env,
