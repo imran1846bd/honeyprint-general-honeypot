@@ -17,6 +17,7 @@ from deployment.mainsail import installed,prepare
 
 class SocketClient:
     def __init__(self,port):
+        self.pending=[]
         self.socket=socket.create_connection(('127.0.0.1',port),timeout=15)
         self.stream=self.socket.makefile('rb',buffering=0)
         key=base64.b64encode(os.urandom(16)).decode()
@@ -42,20 +43,35 @@ class SocketClient:
         size=len(data);mask=os.urandom(4)
         header=bytes([129,128|size]) if size<126 else bytes([129,254])+struct.pack('!H',size)
         self.socket.sendall(header+mask+bytes(v^mask[i%4] for i,v in enumerate(data)))
-    def receive(self):
+    def read_message(self):
         a,b=self.exact(2);size=b&127
         if size==126:size=struct.unpack('!H',self.exact(2))[0]
         elif size==127:size=struct.unpack('!Q',self.exact(8))[0]
         if a&15!=1 or b&128 or size>1048576: raise ValueError('Unexpected server frame')
         return json.loads(self.exact(size))
+    def receive(self):
+        return self.pending.pop(0) if self.pending else self.read_message()
     def response(self,ident):
         deadline=time.monotonic()+20
         while time.monotonic()<deadline:
-            message=self.receive()
+            message=self.read_message()
             if message.get('id')==ident:return message
+            self.pending.append(message)
         raise TimeoutError()
     def close(self):
         self.socket.close();self.stream.close()
+
+
+class SocketClientTests(unittest.TestCase):
+    def test_rpc_wait_preserves_earlier_native_notifications(self):
+        from unittest.mock import Mock
+        client=SocketClient.__new__(SocketClient);client.pending=[]
+        notification={'method':'notify_status_update','params':[{'print_stats':{'state':'complete'}}]}
+        reply={'id':6,'result':'ok'}
+        client.read_message=Mock(side_effect=[notification,reply])
+        self.assertEqual(client.response(6),reply)
+        self.assertEqual(client.receive(),notification)
+        self.assertEqual(client.read_message.call_count,2)
 
 
 @unittest.skipUnless(os.environ.get('HONEYPRINT_TEST_KLIPPER')=='1','requires the pinned Docker runtime')
