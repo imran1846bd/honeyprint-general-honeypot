@@ -9,10 +9,13 @@ from deployment.klipper_environment import KlipperEnvironment
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def install_selected(config, octoprint_python=None):
+def install_selected(config, octoprint_python=None, *, octoprint_source=None, klipper_source=None):
     """Prepare dependencies only; platform lifecycle remains owned by the core."""
     platforms = {item['platform'] for item in config['instances']}
     selected = octoprint_python
+    if octoprint_source or klipper_source:
+        from deployment.local_sources import prepare_sources
+        selected = prepare_sources(platforms, octoprint_source, klipper_source, selected)
     if 'octoprint' in platforms and selected is None:
         if not (3, 10) <= sys.version_info[:2] <= (3, 13):
             raise AdapterError('The pinned OctoPrint runtime requires Python 3.10 through 3.13')
