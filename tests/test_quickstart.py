@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 import time
 import unittest
 
-from quickstart import runtime_ready
+from quickstart import runtime_ready, stop_children
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -95,6 +95,29 @@ telemetry:
                 self.assert_closed(ports)
             finally:
                 if process.poll() is None:process.kill();process.communicate(timeout=15)
+
+    def test_shutdown_preserves_active_owned_helper_for_core_cleanup(self):
+        code = """import signal,subprocess,sys,time
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])
+def stop(*args):
+ print('owned_helper_alive='+str(child.poll() is None),flush=True)
+ child.terminate();child.wait(timeout=5);sys.exit(0)
+signal.signal(signal.SIGTERM,stop)
+print('ready',flush=True)
+while True:time.sleep(.1)
+"""
+        process=subprocess.Popen([sys.executable,'-c',code],start_new_session=True,
+                                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        try:
+            self.assertEqual(process.stdout.readline().strip(),'ready')
+            stop_children([process])
+            stdout,stderr=process.communicate(timeout=5)
+            self.assertEqual(process.returncode,0,stderr)
+            self.assertIn('owned_helper_alive=True',stdout)
+        finally:
+            if process.poll() is None:
+                import os
+                os.killpg(process.pid,signal.SIGKILL);process.communicate(timeout=5)
 
     def test_occupied_dashboard_port_does_not_start_framework(self):
         with TemporaryDirectory() as tmp,socket.socket() as occupied:
