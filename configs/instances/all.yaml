@@ -1,0 +1,42 @@
+# Run all supported local research backends together.
+schema_version: 1
+instances:
+- id: octo_01
+  platform: octoprint
+  deployment: managed
+  printer_profile: ../profiles/virtual_lab.yaml
+  simulation: virtual_printer
+  services:
+    web_port: 8081
+  stages: []
+  instrumentation:
+    plugin: honeyprint_audit
+    http: true
+    gcode: true
+    state: true
+- id: klipper_01
+  platform: klipper
+  deployment: managed
+  printer_profile: ../profiles/virtual_lab.yaml
+  simulation: avr_sim
+  services:
+    web_port: 8082
+  stages: []
+- id: custom_01
+  platform: custom_lab
+  deployment: managed
+  printer_profile: ../profiles/virtual_lab.yaml
+  simulation: lab_sim
+  services:
+    web_port: 8083
+  stages:
+  - job_intake
+  - build_preparation
+  - build_execution
+  - post_processing
+  - inspection
+telemetry:
+  backend: sqlite
+  capture_requests: true
+  capture_commands: true
+  capture_state_changes: true
