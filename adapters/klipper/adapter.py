@@ -53,7 +53,13 @@ class KlipperAdapter(PlatformAdapter):
         except Exception:
             self.environment.stop()
             raise AdapterError("Klipper API bridge could not bind") from None
-        return self.environment
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            if self.health(self.environment)["ready"]:
+                return self.environment
+            time.sleep(0.5)
+        self.stop(self.environment)
+        raise AdapterError("Klipper did not reach verified MCU readiness")
 
     def health(self, instance):
         if instance is not self.environment:
