@@ -57,7 +57,7 @@ class CustomProcessAdapter(PlatformAdapter):
                 with self.log.open('wb') as output:
                     os.chmod(self.log,0o600)
                     while True:
-                        data=self.process.stdout.read(4096)
+                        data=self.process.stdout.read1(4096)
                         if not data:break
                         if output.tell()+len(data)>1048576:output.seek(0);output.truncate()
                         output.write(data);output.flush()
@@ -134,7 +134,13 @@ class CustomProcessAdapter(PlatformAdapter):
             try:self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid,signal.SIGKILL);self.process.wait(timeout=5)
-            if self.log_thread:self.log_thread.join(5)
+            if self.log_thread:
+                self.log_thread.join(2)
+                if self.log_thread.is_alive():
+                    try:os.killpg(self.process.pid,signal.SIGKILL)
+                    except ProcessLookupError:pass
+                    self.log_thread.join(5)
+                    if self.log_thread.is_alive():raise AdapterError("Custom workers did not release owned log stream")
             self.process.stdout.close();self.process=None;self.log_thread=None
         self.sink=None
     def cleanup_prepared(self,plan):self.stop(self)
