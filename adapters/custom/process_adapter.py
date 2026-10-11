@@ -22,6 +22,7 @@ from core.profile_loader import load_profile
 
 class CustomProcessAdapter(PlatformAdapter):
     platform_id='custom'
+    owned_platform_resources=True
     def __init__(self,*,entry,python=None,health_path='/',runtime_dir=None):
         self.entry=Path(entry).absolute();self.python=Path(python or sys.executable).absolute()
         self.health_path=health_path;self.runtime_dir=Path(runtime_dir or '.honeyprint')
@@ -104,7 +105,7 @@ class CustomProcessAdapter(PlatformAdapter):
                         if adapter.sink:
                             try:
                                 accepted=adapter.sink({'source':'custom','event_type':'http.request','action':self.command,
-                                                      'outcome':'observed','simulation':True,'metadata':{'route':'root' if self.path=='/' else 'other','status':status}})
+                                                      'outcome':'observed','simulation':adapter.owned_platform_resources,'metadata':{'route':'root' if self.path=='/' else 'other','status':status}})
                                 if accepted is False:adapter.failed=True
                             except Exception:adapter.failed=True
             self.server=HTTPServer(('127.0.0.1',self.front_port),Handler)
