@@ -5,6 +5,7 @@ import json
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
+import subprocess
 import tempfile
 import urllib.request
 import zipfile
@@ -36,8 +37,16 @@ def prepare():
     if ROOT.exists():
         return installed()
     ROOT.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-    with urllib.request.urlopen(URL,timeout=30) as response:
-        archive=response.read(4194305)
+    try:
+        if shutil.which('curl'):
+            archive=subprocess.run(['curl','--fail','--silent','--show-error','--location',
+                                    '--max-time','40','--max-filesize','4194304',URL],
+                                   capture_output=True,check=True,timeout=45).stdout
+        else:
+            with urllib.request.urlopen(URL,timeout=30) as response:
+                archive=response.read(4194305)
+    except (OSError,subprocess.SubprocessError):
+        raise AdapterError('Verified Mainsail download failed; check HTTPS connectivity') from None
     if len(archive)>4194304 or hashlib.sha256(archive).hexdigest()!=SHA256:
         raise AdapterError('Mainsail release archive integrity check failed')
     temporary=Path(tempfile.mkdtemp(prefix='.install-',dir=ROOT.parent))
