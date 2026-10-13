@@ -65,6 +65,8 @@ Change `HONEYPRINT_PLATFORM`, stop the current run, then launch again:
 
 The URL is controlled by `HONEYPRINT_PORT`, not the platform name. `HONEYPRINT_INSTANCE_ID` optionally gives the instance your own name. Leave it blank to use the selected platform's default identity. A new platform implementation that is not built in can use the custom HTTP contract or a registered SDK adapter; entering an arbitrary platform name does not generate its implementation.
 
+Keep `./run.sh` running in the foreground of your terminal. Closing that terminal window or tab sends a hangup signal; the launcher then gracefully stops its owned honeypot services and drains pending evidence. Cleanup may take a few seconds. External services selected through a custom API URL remain running.
+
 Use Ctrl-C in the running terminal, or request a graceful stop from another terminal:
 
 ```bash
