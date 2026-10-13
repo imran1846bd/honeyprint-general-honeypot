@@ -93,7 +93,8 @@ def main(argv=None):
         parser.error(str(error))
     if args.duration is not None and not 0 < args.duration <= 86400: parser.error('Invalid duration')
     children=[];stopping=threading.Event()
-    previous={sig:signal.getsignal(sig) for sig in (signal.SIGINT,signal.SIGTERM)}
+    shutdown_signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    previous={sig:signal.getsignal(sig) for sig in shutdown_signals}
     for sig in previous:signal.signal(sig,lambda *_:stopping.set())
     try:
         from core.config_loader import load_config
