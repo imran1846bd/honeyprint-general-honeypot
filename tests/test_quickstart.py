@@ -157,4 +157,42 @@ while True:time.sleep(.1)
             self.assert_closed([ports[1]])
 
 
+
+    def test_terminal_close_stops_core_and_companions(self):
+        import os
+        import pty
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);command,ports=self.setup_paths(root)
+            pid,terminal=pty.fork()
+            if pid == 0:
+                os.chdir(ROOT)
+                os.execv(command[0],command)
+            reaped=False
+            try:
+                deadline=time.monotonic()+15
+                while not runtime_ready(root/'runtime/events.sqlite3',0,{'custom_01'}):
+                    ended,_=os.waitpid(pid,os.WNOHANG)
+                    if ended:
+                        reaped=True;self.fail('Launcher exited before readiness')
+                    if time.monotonic()>deadline:self.fail('Terminal runtime did not start')
+                    time.sleep(.05)
+                # Closing the controlling PTY produces the same hangup as closing a terminal window.
+                os.close(terminal);terminal=None
+                deadline=time.monotonic()+20
+                while time.monotonic()<deadline:
+                    ended,_=os.waitpid(pid,os.WNOHANG)
+                    if ended:reaped=True;break
+                    time.sleep(.05)
+                self.assertTrue(reaped,'Launcher did not exit after terminal hangup')
+                self.assert_closed(ports)
+                self.assertFalse((root/'runtime/control.json').exists())
+                with closing(sqlite3.connect(root/'runtime/events.sqlite3')) as db:
+                    events=[json.loads(row[0]) for row in db.execute('SELECT payload FROM events')]
+                self.assertTrue(any(e['event_type']=='framework.lifecycle' and e['action']=='stop' for e in events))
+            finally:
+                if terminal is not None:os.close(terminal)
+                if not reaped:
+                    os.kill(pid,signal.SIGTERM)
+                    os.waitpid(pid,0)
+
 if __name__=='__main__':unittest.main()
