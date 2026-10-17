@@ -23,7 +23,7 @@ _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]*\Z")
 _ROOT_KEYS = {"schema_version", "instances", "telemetry"}
 _INSTANCE_KEYS = {
     "id", "platform", "adapter", "deployment", "printer_profile", "simulation",
-    "octoprint_settings", "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
+    "octoprint_settings", "klipper_settings", "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
 }
 _TELEMETRY_KEYS = {
     "backend", "capture_requests", "capture_commands", "capture_state_changes",
@@ -85,6 +85,14 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
             try:
                 from deployment.octoprint_settings import resolve_octoprint_settings
                 resolve_octoprint_settings(instance['octoprint_settings'])
+            except ValueError as error:
+                issues.append(str(error))
+        if 'klipper_settings' in instance:
+            if instance.get('platform') != 'klipper' or instance.get('deployment') != 'managed':
+                issues.append(f'{loc}.klipper_settings: requires managed Klipper')
+            try:
+                from deployment.docker.klipper.settings import resolve_klipper_settings
+                resolve_klipper_settings(instance['klipper_settings'])
             except ValueError as error:
                 issues.append(str(error))
         platform = instance.get("platform")
