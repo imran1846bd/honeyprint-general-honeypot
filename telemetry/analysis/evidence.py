@@ -9,10 +9,10 @@ from telemetry.normalizer import validate_event
 
 
 class EvidenceReader:
-    def __init__(self, path: Path, *, timeout=5):
+    def __init__(self, path: Path):
         self.path = Path(path).resolve(strict=True)
         self._connection = sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True,
-                                           timeout=timeout, check_same_thread=False)
+                                           timeout=5, check_same_thread=False)
         self._connection.execute('PRAGMA query_only=ON')
         self._lock = RLock()
 
