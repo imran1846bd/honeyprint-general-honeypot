@@ -23,7 +23,7 @@ _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]*\Z")
 _ROOT_KEYS = {"schema_version", "instances", "telemetry"}
 _INSTANCE_KEYS = {
     "id", "platform", "adapter", "deployment", "printer_profile", "simulation",
-    "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
+    "octoprint_settings", "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
 }
 _TELEMETRY_KEYS = {
     "backend", "capture_requests", "capture_commands", "capture_state_changes",
@@ -79,6 +79,14 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
             if instance_id in seen_ids:
                 issues.append(f"{loc}.id: duplicate instance ID")
             seen_ids.add(instance_id)
+        if 'octoprint_settings' in instance:
+            if instance.get('platform') != 'octoprint' or instance.get('deployment') != 'managed':
+                issues.append(f'{loc}.octoprint_settings: requires managed OctoPrint')
+            try:
+                from deployment.octoprint_settings import resolve_octoprint_settings
+                resolve_octoprint_settings(instance['octoprint_settings'])
+            except ValueError as error:
+                issues.append(str(error))
         platform = instance.get("platform")
         identifier(platform, f"{loc}.platform")
         registered("platform_adapter", instance.get("adapter", platform), f"{loc}.adapter")
