@@ -20,10 +20,10 @@ class ConfigValidationError(ValueError):
 
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]*\Z")
-_ROOT_KEYS = {"schema_version", "instances", "telemetry"}
+_ROOT_KEYS = {"schema_version", "instances", "telemetry", "runtime"}
 _INSTANCE_KEYS = {
     "id", "platform", "adapter", "deployment", "printer_profile", "simulation",
-    "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
+    "octoprint_settings", "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
 }
 _TELEMETRY_KEYS = {
     "backend", "capture_requests", "capture_commands", "capture_state_changes",
@@ -79,6 +79,14 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
             if instance_id in seen_ids:
                 issues.append(f"{loc}.id: duplicate instance ID")
             seen_ids.add(instance_id)
+        if 'octoprint_settings' in instance:
+            if instance.get('platform') != 'octoprint' or instance.get('deployment') != 'managed':
+                issues.append(f'{loc}.octoprint_settings: requires managed OctoPrint')
+            try:
+                from deployment.octoprint_settings import resolve_octoprint_settings
+                resolve_octoprint_settings(instance['octoprint_settings'])
+            except ValueError as error:
+                issues.append(str(error))
         platform = instance.get("platform")
         identifier(platform, f"{loc}.platform")
         registered("platform_adapter", instance.get("adapter", platform), f"{loc}.adapter")
@@ -137,6 +145,22 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
         for flag in _TELEMETRY_KEYS - {"backend"}:
             if type(telemetry.get(flag)) is not bool:
                 issues.append(f"telemetry.{flag}: expected a boolean")
+    from core.runtime_settings import resolve_settings
+    try:
+        options=resolve_settings(config.get('runtime', {}))
+        from core.runtime_settings import DEFAULTS
+        for cfg in instances:
+            if not isinstance(cfg,dict): continue
+            if cfg.get('platform')=='octoprint' and cfg.get('deployment')=='attach':
+                managed_only=('camera_source','camera_enabled','preheat_hotend_c','preheat_bed_c','request_max_bytes','upload_max_bytes')
+                if any(options[k]!=DEFAULTS[k] for k in managed_only):
+                    issues.append('runtime: camera, preheat and HTTP limit overrides require managed OctoPrint')
+            if options['camera_source'] != 'auto' and cfg.get('platform') != 'octoprint':
+                issues.append('runtime.camera_source: explicit source requires OctoPrint camera support')
+            if cfg.get('platform')=='custom' and any(options[k]!=DEFAULTS[k] for k in ('preheat_hotend_c','preheat_bed_c')):
+                issues.append('runtime.preheat: external custom code/API has no standard heater command contract')
+    except ValueError as error:
+        issues.append(str(error))
     if issues:
         raise ConfigValidationError(issues)
 
