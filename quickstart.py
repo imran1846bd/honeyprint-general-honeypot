@@ -73,7 +73,7 @@ def main(argv=None):
     parser.add_argument('--no-bootstrap',action='store_true',help='Use already installed platform dependencies')
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
     args=parser.parse_args(argv)
-    generated=None;selected=None;ssh_ready_directory=None
+    generated=None;selected=None;ssh_ready_directory=None;telnet_ready_directory=None
     try:
         if args.config is None:
             from deployment.env_config import read_env, build_config
@@ -87,6 +87,9 @@ def main(argv=None):
         ssh_enabled=selected['ssh_enabled'] if selected else False
         ssh_host=selected['ssh_host'] if selected else '127.0.0.1'
         ssh_port=selected['ssh_port'] if selected else 2222
+        telnet_enabled=selected['telnet_enabled'] if selected else False
+        telnet_host=selected['telnet_host'] if selected else '127.0.0.1'
+        telnet_port=selected['telnet_port'] if selected else 2323
         args.runtime_dir=args.runtime_dir or ROOT/'.honeyprint/quickstart'
         args.dashboard_port=args.dashboard_port or 8090
         args.custom_health_path=args.custom_health_path or '/'
@@ -143,6 +146,19 @@ def main(argv=None):
                 try:probe.bind((ssh_host,ssh_port))
                 except OSError:
                     raise RuntimeError(f'SSH port {ssh_port} is already in use. Change HONEYPRINT_SSH_PORT in .env') from None
+        if telnet_enabled:
+            if len(config['instances']) != 1:
+                raise ValueError('Telnet decoy requires one selected platform instance')
+            if telnet_port == args.dashboard_port and args.analyst_enabled:
+                raise ValueError('Telnet port conflicts with the analyst dashboard port')
+            if any(telnet_port in instance['services'].values() for instance in config['instances']):
+                raise ValueError('Telnet port conflicts with a platform port')
+            if ssh_enabled and telnet_port == ssh_port:
+                raise ValueError('Telnet port conflicts with the SSH port')
+            with socket.socket() as probe:
+                try:probe.bind((telnet_host,telnet_port))
+                except OSError:
+                    raise RuntimeError(f'Telnet port {telnet_port} is already in use. Change HONEYPRINT_TELNET_PORT in .env') from None
         runtime=args.runtime_dir.absolute();database=runtime/'events.sqlite3';alerts=runtime/'analysis.sqlite3'
         if args.analyst_enabled:
             with socket.socket() as probe:
@@ -179,6 +195,23 @@ def main(argv=None):
                 if stopping.wait(0.1):return 0
                 if any(p.poll() is not None for p in children) or time.monotonic()>deadline:
                     raise RuntimeError('SSH service startup failed')
+        if telnet_enabled:
+            instance=config['instances'][0]
+            telnet_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-telnet-')
+            telnet_ready=Path(telnet_ready_directory.name)/'ready'
+            telnet_env=os.environ.copy()
+            telnet_env['HONEYPRINT_TELNET_USERNAME']=selected['telnet_username']
+            telnet_env['HONEYPRINT_TELNET_PASSWORD']=selected['telnet_password']
+            telnet_command=[sys.executable,'-m','services.telnet_decoy',
+                '--host',telnet_host,'--port',str(telnet_port),'--database',str(database),
+                '--instance-id',instance['id'],'--platform',instance['platform'],
+                '--ready-file',str(telnet_ready)]
+            children.append(subprocess.Popen(telnet_command,cwd=ROOT,env=telnet_env,start_new_session=True))
+            deadline=time.monotonic()+10
+            while not telnet_ready.exists():
+                if stopping.wait(0.1):return 0
+                if any(p.poll() is not None for p in children) or time.monotonic()>deadline:
+                    raise RuntimeError('Telnet service startup failed')
         children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.service','--database',str(database),
                                           '--alerts',str(alerts),'--watch'],cwd=ROOT,start_new_session=True))
         if args.analyst_enabled:
@@ -198,6 +231,7 @@ def main(argv=None):
         links=', '.join(f'http://127.0.0.1:{i["services"]["web_port"]}' for i in config['instances'])
         print(f'Local services ready. Honeypot: {links}. Logs: {database}. Ctrl-C stops all services.',flush=True)
         if ssh_enabled:print(f'SSH decoy: ssh -p {ssh_port} {selected["ssh_username"]}@127.0.0.1',flush=True)
+        if telnet_enabled:print(f'Telnet decoy: telnet 127.0.0.1 {telnet_port}',flush=True)
         if args.analyst_enabled:print(f'Optional analyst dashboard: http://127.0.0.1:{args.dashboard_port}',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
@@ -214,6 +248,7 @@ def main(argv=None):
     finally:
         stop_children(children)
         if ssh_ready_directory:ssh_ready_directory.cleanup()
+        if telnet_ready_directory:telnet_ready_directory.cleanup()
         if generated:generated.cleanup()
         for sig,handler in previous.items():signal.signal(sig,handler)
         if children and children[0].returncode != 0:
