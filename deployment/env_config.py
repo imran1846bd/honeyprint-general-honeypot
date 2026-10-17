@@ -13,6 +13,8 @@ KEYS={'HONEYPRINT_PLATFORM','HONEYPRINT_PORT','HONEYPRINT_DASHBOARD_PORT','HONEY
       'HONEYPRINT_CUSTOM_API_URL','HONEYPRINT_ANALYST_ENABLED','HONEYPRINT_INSTANCE_ID','HONEYPRINT_OCTOPRINT_SOURCE','HONEYPRINT_KLIPPER_SOURCE'}
 KEYS |= {'HONEYPRINT_SSH_ENABLED', 'HONEYPRINT_SSH_HOST', 'HONEYPRINT_SSH_PORT',
          'HONEYPRINT_SSH_USERNAME', 'HONEYPRINT_SSH_PASSWORD'}
+KEYS |= {'HONEYPRINT_TELNET_ENABLED', 'HONEYPRINT_TELNET_HOST', 'HONEYPRINT_TELNET_PORT',
+         'HONEYPRINT_TELNET_USERNAME', 'HONEYPRINT_TELNET_PASSWORD'}
 
 
 def read_env(path):
@@ -133,6 +135,18 @@ def build_config(values,base,output):
     ssh_password = values.get('HONEYPRINT_SSH_PASSWORD', 'admin')
     if not 1 <= len(ssh_password) <= 128 or any(ord(c) < 32 for c in ssh_password):
         raise ValueError('HONEYPRINT_SSH_PASSWORD must be 1..128 printable characters')
+    telnet_enabled = values.get('HONEYPRINT_TELNET_ENABLED', 'false').lower()
+    if telnet_enabled not in ('true', 'false'):
+        raise ValueError('HONEYPRINT_TELNET_ENABLED must be true or false')
+    telnet_host = values.get('HONEYPRINT_TELNET_HOST', '127.0.0.1')
+    if telnet_host not in ('127.0.0.1', '0.0.0.0'):
+        raise ValueError('HONEYPRINT_TELNET_HOST must be 127.0.0.1 or 0.0.0.0')
+    telnet_username = values.get('HONEYPRINT_TELNET_USERNAME', 'admin')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,32}', telnet_username):
+        raise ValueError('HONEYPRINT_TELNET_USERNAME must be 1..32 simple characters')
+    telnet_password = values.get('HONEYPRINT_TELNET_PASSWORD', 'admin')
+    if not 1 <= len(telnet_password) <= 128 or any(ord(c) < 32 for c in telnet_password):
+        raise ValueError('HONEYPRINT_TELNET_PASSWORD must be 1..128 printable characters')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
         if instance['platform'] == 'octoprint':
@@ -163,4 +177,7 @@ def build_config(values,base,output):
             'custom_health_path':values.get('HONEYPRINT_CUSTOM_HEALTH_PATH') or '/',
             'ssh_enabled':ssh_enabled == 'true', 'ssh_host':ssh_host,
             'ssh_port':port(values.get('HONEYPRINT_SSH_PORT'),2222),
-            'ssh_username':ssh_username, 'ssh_password':ssh_password}
+            'ssh_username':ssh_username, 'ssh_password':ssh_password,
+            'telnet_enabled':telnet_enabled == 'true', 'telnet_host':telnet_host,
+            'telnet_port':port(values.get('HONEYPRINT_TELNET_PORT'),2323),
+            'telnet_username':telnet_username, 'telnet_password':telnet_password}
