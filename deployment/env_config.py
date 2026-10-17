@@ -81,6 +81,28 @@ def build_config(values,base,output):
                 else:
                     octoprint_python = resolved.absolute()
         octoprint_settings = resolve_octoprint_settings(octoprint_data.get('settings', {}))
+    klipper_settings = None
+    klipper_source = path('HONEYPRINT_KLIPPER_SOURCE')
+    if platform in ('klipper', 'all'):
+        from deployment.docker.klipper.settings import resolve_klipper_settings
+        klipper_file = base / 'configs/platforms/klipper.yaml'
+        if not klipper_file.is_file() and not (base / 'configs/platforms').exists():
+            klipper_file = ROOT / 'configs/platforms/klipper.yaml'
+        if klipper_file.stat().st_size > 65536:
+            raise ValueError('Klipper platform configuration exceeds size limit')
+        klipper_data = load_config(klipper_file)
+        if (type(klipper_data.get('schema_version')) is not int or
+                klipper_data['schema_version'] != 1 or
+                set(klipper_data) - {'schema_version', 'source', 'settings'}):
+            raise ValueError('Invalid Klipper platform configuration schema')
+        source_value = klipper_data.get('source', '')
+        if not isinstance(source_value, str):
+            raise ValueError('Klipper source must be a path string')
+        if source_value and klipper_source is None:
+            candidate = Path(source_value).expanduser()
+            klipper_source = (candidate if candidate.is_absolute() else
+                              klipper_file.parent.parent.parent / candidate).absolute()
+        klipper_settings = resolve_klipper_settings(klipper_data.get('settings', {}))
     config=load_config(ROOT/'configs/instances/all.yaml' if platform=='all' else ROOT/f'configs/instances/{names[platform]}.yaml')
     profile=load_profile(path('HONEYPRINT_PROFILE',str(ROOT/'configs/profiles/virtual_lab.yaml')))
     for key,dimension in [('HONEYPRINT_WIDTH','width'),('HONEYPRINT_DEPTH','depth'),('HONEYPRINT_HEIGHT','height')]:
@@ -102,6 +124,8 @@ def build_config(values,base,output):
         instance['printer_profile']=str(profile_path.absolute())
         if instance['platform'] == 'octoprint':
             instance['octoprint_settings'] = octoprint_settings
+        elif instance['platform'] == 'klipper':
+            instance['klipper_settings'] = klipper_settings
         if values.get('HONEYPRINT_INSTANCE_ID'):instance['id']=values['HONEYPRINT_INSTANCE_ID']
         if platform != 'all':instance['services']['web_port']=port(values.get('HONEYPRINT_PORT'),8081)
         if instance['platform']=='custom_lab' and values.get('HONEYPRINT_CUSTOM_CODE'):
@@ -118,7 +142,7 @@ def build_config(values,base,output):
             'dashboard_port':port(values.get('HONEYPRINT_DASHBOARD_PORT'),8090),
             'octoprint_python':octoprint_python,
             'octoprint_source':octoprint_source if platform in ('all','octoprint') else None,
-            'klipper_source':path('HONEYPRINT_KLIPPER_SOURCE') if platform in ('all','klipper') else None,
+            'klipper_source':klipper_source if platform in ('all','klipper') else None,
             'analyst_enabled':analyst == 'true',
             'custom_api_url':values.get('HONEYPRINT_CUSTOM_API_URL') if platform in ('all','custom') else None,
             'custom_code':path('HONEYPRINT_CUSTOM_CODE') if platform in ('all','custom') else None,
