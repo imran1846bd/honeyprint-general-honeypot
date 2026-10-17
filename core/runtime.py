@@ -7,6 +7,8 @@ import time
 
 from core.dependency_resolver import resolve_dependencies
 from core.event_bus import EventBus
+from core.runtime_settings import resolve_settings
+from core.storage_paths import artifact_root, DiskSpaceMonitor
 from core.manufacturing_service import ManufacturingService
 from telemetry.artifact_storage import ArtifactStorage
 from core.instance_builder import build_instances
@@ -34,7 +36,9 @@ class FrameworkRuntime:
         self.base_dir = Path(base_dir)
         self.runtime_dir = Path(runtime_dir).absolute()
         self.stop_event = threading.Event()
-        self.bus = EventBus()
+        self.settings = resolve_settings(config.get('runtime', {}))
+        self.disk_monitor=DiskSpaceMonitor([self.runtime_dir, artifact_root(self.runtime_dir,self.settings)], self.settings['disk_warning_bytes'])
+        self.bus = EventBus(capacity=self.settings['event_queue_capacity'])
         self._controllers = []
         self._storage = None
         self._collector = None
@@ -58,7 +62,7 @@ class FrameworkRuntime:
         }, instance_id=instance.instance_id, platform=instance.plan.config['platform'])
         if not self.bus.publish(event):
             raise FrameworkRuntimeError('Lifecycle evidence could not enter the telemetry queue')
-        self._collector.drain()
+        self._collector.drain(max_batches=self.settings['collector_max_batches'])
         if self._storage.read_event(event['event_id']) != event:
             raise FrameworkRuntimeError('Lifecycle evidence was not read back from storage')
 
@@ -78,17 +82,20 @@ class FrameworkRuntime:
         cleanup_failures = []
         try:
             storage_factory = self.registry.resolve('storage', plan.telemetry['backend'])
-            self._storage = storage_factory(self.runtime_dir / 'events.sqlite3')
+            self._storage = storage_factory(self.runtime_dir / self.settings['evidence_db_name'])
             if not callable(getattr(self._storage, 'read_event', None)) or not callable(getattr(self._storage, 'close', None)):
                 raise FrameworkRuntimeError('Storage provider does not implement runtime verification and close')
-            self._collector = Collector(self.bus, self._storage)
+            self._collector = Collector(self.bus, self._storage, batch_size=self.settings['collector_batch_size'])
             for instance in instances.values():
                 if self.stop_event.is_set():
                     break
                 if instance.plan.config.get('stages'):
                     instance.resources['manufacturing'] = ManufacturingService(
                         instance.plan, artifact_storage=ArtifactStorage(
-                            self.runtime_dir / 'artifacts' / instance.instance_id),
+                            artifact_root(self.runtime_dir,self.settings) / instance.instance_id,
+                            max_bytes=self.settings['artifact_max_total_bytes'],
+                            max_artifacts=self.settings['artifact_max_files'],
+                            max_file_bytes=self.settings['artifact_max_file_bytes']),
                         sink=self._sink(instance.instance_id, instance.plan.config['platform']),
                     )
                 controller = LifecycleManager(
@@ -98,25 +105,35 @@ class FrameworkRuntime:
                 self._controllers.append(controller)
                 controller.prepare()
                 report = controller.start()
-                deadline = time.monotonic() + 30
+                deadline = time.monotonic() + self.settings['ready_timeout_seconds']
                 while not report['ready']:
-                    self._collector.drain()
-                    if self.stop_event.wait(0.2) or time.monotonic() >= deadline:
+                    self._collector.drain(max_batches=self.settings['collector_max_batches'])
+                    if self.stop_event.wait(min(self.settings['collector_interval_seconds'], self.settings['health_interval_seconds'])) or time.monotonic() >= deadline:
                         raise FrameworkRuntimeError('Instance did not reach verified readiness')
                     report = controller.check_health()
                 self._lifecycle_event(instance, 'start')
                 if on_ready:
                     on_ready(instance, report)
             started = time.monotonic()
-            while not self.stop_event.wait(0.2):
-                self._collector.drain()
+            next_collection = next_health = started
+            while not self.stop_event.is_set():
+                now = time.monotonic()
+                if now >= next_collection:
+                    self._collector.drain(max_batches=self.settings['collector_max_batches'])
+                    next_collection = time.monotonic() + self.settings['collector_interval_seconds']
                 if self.bus.stats()['dropped']:
                     raise FrameworkRuntimeError('Telemetry queue dropped events')
-                for controller in self._controllers:
-                    if not controller.check_health()['ready']:
-                        raise FrameworkRuntimeError('Runtime health or observation coverage degraded')
+                if now >= next_health:
+                    self.disk_monitor.check()
+                    for controller in self._controllers:
+                        if not controller.check_health()['ready']:
+                            raise FrameworkRuntimeError('Runtime health or observation coverage degraded')
+                    next_health = time.monotonic() + self.settings['health_interval_seconds']
                 if duration is not None and time.monotonic() - started >= duration:
                     break
+                wake = min(next_collection, next_health)
+                if duration is not None: wake = min(wake, started + duration)
+                self.stop_event.wait(max(0, min(0.2, wake - time.monotonic())))
         except KeyboardInterrupt:
             self.stop_event.set()
         except Exception as exc:
@@ -135,7 +152,7 @@ class FrameworkRuntime:
                     cleanup_failures.append(controller.instance.instance_id)
             if self._collector:
                 try:
-                    self._collector.drain(max_batches=1000)
+                    self._collector.drain(max_batches=self.settings['final_drain_max_batches'])
                     if self._collector.stats()['pending'] or self.bus.stats()['depth']:
                         raise FrameworkRuntimeError('Telemetry remains undrained')
                 except Exception:
