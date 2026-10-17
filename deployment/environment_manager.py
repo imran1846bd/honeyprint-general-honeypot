@@ -108,6 +108,10 @@ class OctoPrintEnvironment:
                 'serial': {'port': 'VIRTUAL', 'autoconnect': False},
                 'printerProfiles': {'default': profile['id']},
             }
+            from deployment.octoprint_settings import resolve_octoprint_settings
+            specific = resolve_octoprint_settings(config.get('octoprint_settings', {}))
+            settings['plugins']['virtual_printer'].update(specific['virtual_printer'])
+            settings['appearance'] = {**specific['appearance'], 'name': profile['name']}
             source_dir = os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_DIR')
             if source_dir and (Path(source_dir) / 'tools/simulated_webcam.py').is_file():
                 self.camera = SourceCamera(self.root, self.python, source_dir)
