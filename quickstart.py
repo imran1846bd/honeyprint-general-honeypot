@@ -73,7 +73,7 @@ def main(argv=None):
     parser.add_argument('--no-bootstrap',action='store_true',help='Use already installed platform dependencies')
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
     args=parser.parse_args(argv)
-    generated=None
+    generated=None;selected=None;ssh_ready_directory=None
     try:
         if args.config is None:
             from deployment.env_config import read_env, build_config
@@ -84,6 +84,9 @@ def main(argv=None):
             for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path','octoprint_source','klipper_source','custom_api_url','analyst_enabled'):
                 if getattr(args,field) is None:setattr(args,field,selected[field])
         if args.analyst_enabled is None:args.analyst_enabled=True
+        ssh_enabled=selected['ssh_enabled'] if selected else False
+        ssh_host=selected['ssh_host'] if selected else '127.0.0.1'
+        ssh_port=selected['ssh_port'] if selected else 2222
         args.runtime_dir=args.runtime_dir or ROOT/'.honeyprint/quickstart'
         args.dashboard_port=args.dashboard_port or 8090
         args.custom_health_path=args.custom_health_path or '/'
@@ -129,6 +132,17 @@ def main(argv=None):
         if not expected:raise ValueError('No configured instances')
         if args.analyst_enabled and any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
             raise ValueError('Dashboard port conflicts with a platform port')
+        if ssh_enabled:
+            if len(config['instances']) != 1:
+                raise ValueError('SSH decoy requires one selected platform instance')
+            if ssh_port == args.dashboard_port and args.analyst_enabled:
+                raise ValueError('SSH port conflicts with the analyst dashboard port')
+            if any(ssh_port in instance['services'].values() for instance in config['instances']):
+                raise ValueError('SSH port conflicts with a platform port')
+            with socket.socket() as probe:
+                try:probe.bind((ssh_host,ssh_port))
+                except OSError:
+                    raise RuntimeError(f'SSH port {ssh_port} is already in use. Change HONEYPRINT_SSH_PORT in .env') from None
         runtime=args.runtime_dir.absolute();database=runtime/'events.sqlite3';alerts=runtime/'analysis.sqlite3'
         if args.analyst_enabled:
             with socket.socket() as probe:
@@ -148,6 +162,23 @@ def main(argv=None):
             if stopping.wait(0.1):return 0
             if children[0].poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('Framework startup failed')
+        if ssh_enabled:
+            instance=config['instances'][0]
+            ssh_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-ssh-')
+            ssh_ready=Path(ssh_ready_directory.name)/'ready'
+            ssh_env=os.environ.copy()
+            ssh_env['HONEYPRINT_SSH_USERNAME']=selected['ssh_username']
+            ssh_env['HONEYPRINT_SSH_PASSWORD']=selected['ssh_password']
+            ssh_command=[sys.executable,'-m','services.ssh_decoy',
+                '--host',ssh_host,'--port',str(ssh_port),'--database',str(database),
+                '--instance-id',instance['id'],'--platform',instance['platform'],
+                '--host-key',str(runtime/'ssh_host_key'),'--ready-file',str(ssh_ready)]
+            children.append(subprocess.Popen(ssh_command,cwd=ROOT,env=ssh_env,start_new_session=True))
+            deadline=time.monotonic()+10
+            while not ssh_ready.exists():
+                if stopping.wait(0.1):return 0
+                if any(p.poll() is not None for p in children) or time.monotonic()>deadline:
+                    raise RuntimeError('SSH service startup failed')
         children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.service','--database',str(database),
                                           '--alerts',str(alerts),'--watch'],cwd=ROOT,start_new_session=True))
         if args.analyst_enabled:
@@ -166,6 +197,7 @@ def main(argv=None):
                 if time.monotonic()>deadline:raise RuntimeError('Dashboard startup failed')
         links=', '.join(f'http://127.0.0.1:{i["services"]["web_port"]}' for i in config['instances'])
         print(f'Local services ready. Honeypot: {links}. Logs: {database}. Ctrl-C stops all services.',flush=True)
+        if ssh_enabled:print(f'SSH decoy: ssh -p {ssh_port} {selected["ssh_username"]}@127.0.0.1',flush=True)
         if args.analyst_enabled:print(f'Optional analyst dashboard: http://127.0.0.1:{args.dashboard_port}',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
@@ -181,6 +213,7 @@ def main(argv=None):
         return 1
     finally:
         stop_children(children)
+        if ssh_ready_directory:ssh_ready_directory.cleanup()
         if generated:generated.cleanup()
         for sig,handler in previous.items():signal.signal(sig,handler)
         if children and children[0].returncode != 0:

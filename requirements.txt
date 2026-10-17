@@ -1,2 +1,3 @@
 # YAML parsing for core/config_loader.py.
 PyYAML==6.0.3
+Paramiko==4.0.0

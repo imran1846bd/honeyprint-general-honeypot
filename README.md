@@ -49,6 +49,8 @@ Start the selected honeypot:
 ./run.sh
 ```
 
+To enable the simulated SSH printer console, set `HONEYPRINT_SSH_ENABLED=true` in `.env`. The default listener is `127.0.0.1:2222`; `HONEYPRINT_SSH_HOST`, `HONEYPRINT_SSH_PORT`, `HONEYPRINT_SSH_USERNAME` and `HONEYPRINT_SSH_PASSWORD` are configurable. Restart `./run.sh`, then connect with `ssh -p 2222 admin@127.0.0.1` and enter the configured password. SSH uses a separate port from the web honeypot. It emulates fixed printer-console commands and never runs a host shell. Login outcomes and command names enter the shared `events.sqlite3`; passwords and command arguments are not recorded. The SSH host key stays private in the runtime directory. The default binds only to this computer; `0.0.0.0` explicitly exposes the decoy on local network interfaces.
+
 Open **http://127.0.0.1:8081**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
 
 ## Switch the platform

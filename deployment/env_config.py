@@ -11,6 +11,8 @@ KEYS={'HONEYPRINT_PLATFORM','HONEYPRINT_PORT','HONEYPRINT_DASHBOARD_PORT','HONEY
       'HONEYPRINT_HEATED_BED','HONEYPRINT_RUNTIME_DIR','HONEYPRINT_OCTOPRINT_PYTHON',
       'HONEYPRINT_CUSTOM_CODE','HONEYPRINT_CUSTOM_PYTHON','HONEYPRINT_CUSTOM_HEALTH_PATH',
       'HONEYPRINT_CUSTOM_API_URL','HONEYPRINT_ANALYST_ENABLED','HONEYPRINT_INSTANCE_ID','HONEYPRINT_OCTOPRINT_SOURCE','HONEYPRINT_KLIPPER_SOURCE'}
+KEYS |= {'HONEYPRINT_SSH_ENABLED', 'HONEYPRINT_SSH_HOST', 'HONEYPRINT_SSH_PORT',
+         'HONEYPRINT_SSH_USERNAME', 'HONEYPRINT_SSH_PASSWORD'}
 
 
 def read_env(path):
@@ -120,6 +122,17 @@ def build_config(values,base,output):
         raise ValueError('Choose a custom code path or API URL, not both')
     analyst = values.get('HONEYPRINT_ANALYST_ENABLED', 'false').lower()
     if analyst not in ('true', 'false'):raise ValueError('HONEYPRINT_ANALYST_ENABLED must be true or false')
+    ssh_enabled = values.get('HONEYPRINT_SSH_ENABLED', 'false').lower()
+    if ssh_enabled not in ('true', 'false'):raise ValueError('HONEYPRINT_SSH_ENABLED must be true or false')
+    ssh_host = values.get('HONEYPRINT_SSH_HOST', '127.0.0.1')
+    if ssh_host not in ('127.0.0.1', '0.0.0.0'):
+        raise ValueError('HONEYPRINT_SSH_HOST must be 127.0.0.1 or 0.0.0.0')
+    ssh_username = values.get('HONEYPRINT_SSH_USERNAME', 'admin')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,32}', ssh_username):
+        raise ValueError('HONEYPRINT_SSH_USERNAME must be 1..32 simple characters')
+    ssh_password = values.get('HONEYPRINT_SSH_PASSWORD', 'admin')
+    if not 1 <= len(ssh_password) <= 128 or any(ord(c) < 32 for c in ssh_password):
+        raise ValueError('HONEYPRINT_SSH_PASSWORD must be 1..128 printable characters')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
         if instance['platform'] == 'octoprint':
@@ -147,4 +160,7 @@ def build_config(values,base,output):
             'custom_api_url':values.get('HONEYPRINT_CUSTOM_API_URL') if platform in ('all','custom') else None,
             'custom_code':path('HONEYPRINT_CUSTOM_CODE') if platform in ('all','custom') else None,
             'custom_python':path('HONEYPRINT_CUSTOM_PYTHON'),
-            'custom_health_path':values.get('HONEYPRINT_CUSTOM_HEALTH_PATH') or '/'}
+            'custom_health_path':values.get('HONEYPRINT_CUSTOM_HEALTH_PATH') or '/',
+            'ssh_enabled':ssh_enabled == 'true', 'ssh_host':ssh_host,
+            'ssh_port':port(values.get('HONEYPRINT_SSH_PORT'),2222),
+            'ssh_username':ssh_username, 'ssh_password':ssh_password}
