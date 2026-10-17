@@ -55,6 +55,32 @@ def build_config(values,base,output):
     platform=values.get('HONEYPRINT_PLATFORM','octoprint').strip().lower()
     names={'octoprint':'octoprint','klipper':'klipper','custom':'custom'}
     if platform not in (*names,'all'):raise ValueError('HONEYPRINT_PLATFORM must be all, octoprint, klipper or custom')
+    octoprint_settings = None
+    octoprint_source = path('HONEYPRINT_OCTOPRINT_SOURCE')
+    octoprint_python = path('HONEYPRINT_OCTOPRINT_PYTHON')
+    if platform in ('octoprint', 'all'):
+        from deployment.octoprint_settings import resolve_octoprint_settings
+        octoprint_file = base / 'configs/platforms/octoprint.yaml'
+        if not octoprint_file.is_file() and not (base / 'configs/platforms').exists():
+            octoprint_file = ROOT / 'configs/platforms/octoprint.yaml'
+        if octoprint_file.stat().st_size > 65536:
+            raise ValueError('OctoPrint platform configuration exceeds size limit')
+        octoprint_data = load_config(octoprint_file)
+        if (octoprint_data.get('schema_version') != 1 or
+                set(octoprint_data) - {'schema_version', 'source', 'python', 'settings'}):
+            raise ValueError('Invalid OctoPrint platform configuration schema')
+        for field in ('source', 'python'):
+            value = octoprint_data.get(field, '')
+            if not isinstance(value, str):
+                raise ValueError(f'OctoPrint {field} must be a path string')
+            if value and (octoprint_source if field == 'source' else octoprint_python) is None:
+                candidate = Path(value).expanduser()
+                resolved = candidate if candidate.is_absolute() else octoprint_file.parent.parent.parent / candidate
+                if field == 'source':
+                    octoprint_source = resolved.absolute()
+                else:
+                    octoprint_python = resolved.absolute()
+        octoprint_settings = resolve_octoprint_settings(octoprint_data.get('settings', {}))
     config=load_config(ROOT/'configs/instances/all.yaml' if platform=='all' else ROOT/f'configs/instances/{names[platform]}.yaml')
     profile=load_profile(path('HONEYPRINT_PROFILE',str(ROOT/'configs/profiles/virtual_lab.yaml')))
     for key,dimension in [('HONEYPRINT_WIDTH','width'),('HONEYPRINT_DEPTH','depth'),('HONEYPRINT_HEIGHT','height')]:
@@ -74,6 +100,8 @@ def build_config(values,base,output):
     if analyst not in ('true', 'false'):raise ValueError('HONEYPRINT_ANALYST_ENABLED must be true or false')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
+        if instance['platform'] == 'octoprint':
+            instance['octoprint_settings'] = octoprint_settings
         if values.get('HONEYPRINT_INSTANCE_ID'):instance['id']=values['HONEYPRINT_INSTANCE_ID']
         if platform != 'all':instance['services']['web_port']=port(values.get('HONEYPRINT_PORT'),8081)
         if instance['platform']=='custom_lab' and values.get('HONEYPRINT_CUSTOM_CODE'):
@@ -88,8 +116,8 @@ def build_config(values,base,output):
     return {'config':config,'config_path':config_path,
             'runtime_dir':path('HONEYPRINT_RUNTIME_DIR',str(ROOT/'.honeyprint/quickstart')),
             'dashboard_port':port(values.get('HONEYPRINT_DASHBOARD_PORT'),8090),
-            'octoprint_python':path('HONEYPRINT_OCTOPRINT_PYTHON'),
-            'octoprint_source':path('HONEYPRINT_OCTOPRINT_SOURCE') if platform in ('all','octoprint') else None,
+            'octoprint_python':octoprint_python,
+            'octoprint_source':octoprint_source if platform in ('all','octoprint') else None,
             'klipper_source':path('HONEYPRINT_KLIPPER_SOURCE') if platform in ('all','klipper') else None,
             'analyst_enabled':analyst == 'true',
             'custom_api_url':values.get('HONEYPRINT_CUSTOM_API_URL') if platform in ('all','custom') else None,
