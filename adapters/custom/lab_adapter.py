@@ -10,8 +10,6 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-from html import escape
-from core.storage_paths import artifact_root
 import queue
 import threading
 
@@ -57,9 +55,7 @@ class LabHandle:
 class LabAdapter(PlatformAdapter):
     platform_id = 'custom_lab'
 
-    def __init__(self, *, runtime_dir=None, artifact_settings=None):
-        from core.runtime_settings import resolve_settings
-        self._settings = resolve_settings(artifact_settings)
+    def __init__(self, *, runtime_dir=None):
         self._profile = self._handle = self._artifacts = None
         self._runtime_dir = Path(runtime_dir) if runtime_dir is not None else None
 
@@ -80,10 +76,7 @@ class LabAdapter(PlatformAdapter):
         self._profile = load_profile(plan['config']['printer_profile'])
         if plan['config'].get('stages'):
             if self._runtime_dir is None: raise AdapterError('Manufacturing requires an artifact directory')
-            self._artifacts = ArtifactStorage(artifact_root(self._runtime_dir,self._settings) / plan['config']['id'],
-                max_bytes=self._settings['artifact_max_total_bytes'],
-                max_artifacts=self._settings['artifact_max_files'],
-                max_file_bytes=self._settings['artifact_max_file_bytes'])
+            self._artifacts = ArtifactStorage(self._runtime_dir / 'artifacts' / plan['config']['id'])
 
     def launch_or_attach(self, plan):
         if self._profile is None: raise AdapterError('Custom instance is not prepared')
@@ -102,38 +95,26 @@ class LabAdapter(PlatformAdapter):
                 h = adapter._handle
                 status = 200 if self.path in ('/', '/api/state') else 404
                 if self.path == '/':
-                    self.respond(200, '<!doctype html><html><title>'+escape(h.profile['name'])+'</title><h1>'+escape(h.profile['name'])+'</h1><p>Custom Printer Lab: simulated printer API at /api/state.</p><button onclick="fetch(\'/api/preheat\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:\'{}\'}).then(r=>r.json()).then(x=>document.getElementById(\'result\').textContent=JSON.stringify(x))">Preheat</button><pre id="result"></pre></html>', 'text/html; charset=utf-8')
+                    self.respond(200, '<!doctype html><html><title>Custom Printer Lab</title><h1>Custom Printer Lab</h1><p>Simulated printer API is available at /api/state.</p></html>', 'text/html; charset=utf-8')
                 elif self.path == '/api/state':
-                    with h.lock: self.respond(200, dict(h.simulator.snapshot(),printer_name=h.profile['name']))
+                    with h.lock: self.respond(200, h.simulator.snapshot())
                 else: self.respond(404, {'error': 'unknown endpoint'})
                 h.emit('http.request', 'GET', 'observed', {'route': 'state' if self.path == '/api/state' else 'other', 'status': status})
             def do_POST(self):
                 h = adapter._handle
                 status = 200
                 try:
-                    if self.path not in ('/api/command', '/api/job', '/api/preheat') or self.headers.get('Transfer-Encoding'):
+                    if self.path not in ('/api/command', '/api/job') or self.headers.get('Transfer-Encoding'):
                         raise ValueError()
                     length = int(self.headers.get('Content-Length', '0'))
-                    limit = adapter._settings['upload_max_bytes'] if self.path == '/api/job' else adapter._settings['request_max_bytes']
-                    if length > limit: raise OverflowError()
-                    if length < 1: raise ValueError()
+                    limit = 1048576 if self.path == '/api/job' else 4096
+                    if not 1 <= length <= limit: raise ValueError()
                     data = json.loads(self.rfile.read(length))
                     if not isinstance(data, dict): raise ValueError()
-                    if self.path == '/api/preheat':
-                        if data: raise ValueError()
-                        with h.lock:
-                            candidate=deepcopy(h.simulator)
-                            candidate.command(f"M104 S{adapter._settings['preheat_hotend_c']}")
-                            if candidate.heated_bed: candidate.command(f"M140 S{adapter._settings['preheat_bed_c']}")
-                            h.simulator=candidate
-                            response=candidate.snapshot()
-                        self.respond(200,response)
-                        h.emit('printer.command','preheat','accepted')
-                    elif self.path == '/api/job':
+                    if self.path == '/api/job':
                         if set(data) != {'gcode'} or not isinstance(data['gcode'], str): raise ValueError()
                         with h.lock:
                             content = data['gcode'].encode('utf-8')
-                            if not 1 <= len(content) <= h.artifacts.max_file_bytes: raise ValueError()
                             candidate = deepcopy(h.simulator)
                             result, events = run_job(content, candidate, h.stages)
                             artifact = h.artifacts.store(content)
@@ -152,9 +133,6 @@ class LabAdapter(PlatformAdapter):
                         self.respond(200, response)
                         h.emit('printer.command', 'execute', 'accepted', {'gcode': response['gcode']})
                     h.emit('printer.state', 'update', 'observed', {'powered': h.simulator.powered})
-                except OverflowError:
-                    status=413; self.close_connection=True
-                    self.respond(413, {'error':'request too large'})
                 except (ValueError, TypeError, OSError, IndexError):
                     status = 400
                     self.respond(400, {'error': 'unsupported or invalid command'})
