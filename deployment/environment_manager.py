@@ -64,7 +64,9 @@ class OctoPrintEnvironment:
             os.chmod(path, 0o600)
             json.dump(data, stream)
 
-    def prepare(self, config, *, audit_port: int, audit_token: str) -> dict:
+    def prepare(self, config, *, audit_port: int, audit_token: str, common_settings=None) -> dict:
+        from core.runtime_settings import resolve_settings
+        common=resolve_settings(common_settings)
         self.verify_runtime()
         profile = load_profile(config['printer_profile'])
         marker = {'instance_id': self.instance_id, 'platform': 'octoprint'}
@@ -108,10 +110,25 @@ class OctoPrintEnvironment:
                 'serial': {'port': 'VIRTUAL', 'autoconnect': False},
                 'printerProfiles': {'default': profile['id']},
             }
+            from deployment.octoprint_settings import resolve_octoprint_settings
+            specific = resolve_octoprint_settings(config.get('octoprint_settings', {}))
+            settings['plugins']['virtual_printer'].update(specific['virtual_printer'])
+            settings['appearance']={**specific['appearance'], 'name':profile['name']}
+            settings['server'].update(maxSize=common['request_max_bytes'],uploads={'maxSize':common['upload_max_bytes']})
+            settings['temperature']={'profiles':[{'name':'HoneyPrint Preheat','extruder':common['preheat_hotend_c'],
+                'bed':common['preheat_bed_c'] if profile['heated_bed'] else 0}]}
             source_dir = os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_DIR')
-            if source_dir and (Path(source_dir) / 'tools/simulated_webcam.py').is_file():
-                self.camera = SourceCamera(self.root, self.python, source_dir)
-                settings['plugins']['classicwebcam'] = dict(self.camera.settings(), _config_version=1)
+            camera_source=common['camera_source']
+            if common['camera_enabled']:
+                if camera_source.startswith(('http://','https://')):
+                    settings['plugins']['classicwebcam']={'stream':camera_source,'snapshot':None,'_config_version':1}
+                elif source_dir and (Path(source_dir) / 'tools/simulated_webcam.py').is_file():
+                    self.camera = SourceCamera(self.root, self.python, source_dir, video=None if camera_source=='auto' else camera_source)
+                    settings['plugins']['classicwebcam'] = dict(self.camera.settings(), _config_version=1)
+                elif camera_source!='auto':
+                    raise ValueError('Video camera source requires the selected OctoPrint source camera helper')
+            else:
+                settings['plugins']['_disabled'].append('classicwebcam')
             for folder in ('plugins', 'printerProfiles'):
                 (self.root / folder).mkdir(exist_ok=True)
             config_path = self.root / 'config.yaml'
