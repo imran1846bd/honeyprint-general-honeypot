@@ -68,6 +68,12 @@ The default SSH username and password are `admin` / `admin`; `HONEYPRINT_SSH_USE
 
 The console supports only fixed virtual-printer commands (`help`, `status`, `M105`, `M115`, `ls`, `pwd`, `whoami`, `exit`); it never starts a host shell. Accepted/rejected logins and command names are recorded in the shared `.honeyprint/quickstart/events.sqlite3` (or your configured runtime directory); passwords and command arguments are not recorded. The SSH host key is stored privately in that runtime directory. By default SSH binds to `127.0.0.1`; set `HONEYPRINT_SSH_HOST=0.0.0.0` only if you want the decoy reachable on local network interfaces.
 
+## Optional Telnet printer console
+
+Set `HONEYPRINT_TELNET_ENABLED=true` in `.env` and restart `./run.sh`. `HONEYPRINT_TELNET_PORT=2323` sets its port independently of HTTP and SSH. The default listener is `127.0.0.1`, with username and password `admin` / `admin`. Override these locally with `HONEYPRINT_TELNET_HOST`, `HONEYPRINT_TELNET_USERNAME` and `HONEYPRINT_TELNET_PASSWORD`. Connect with `telnet 127.0.0.1 2323`, or use `nc 127.0.0.1 2323` if a Telnet client is unavailable.
+
+Telnet accepts at most three login attempts per connection and responds to the same fixed virtual-printer commands as SSH. It never executes host commands. Authentication outcomes, sessions and command names are recorded in the shared evidence database; passwords and command arguments are omitted. Telnet transmits credentials without encryption, so it binds only to this computer by default. Set `HONEYPRINT_TELNET_HOST=0.0.0.0` only when you intentionally want network access. Set `HONEYPRINT_TELNET_ENABLED=false` to stop the Telnet listener while leaving the web honeypot running.
+
 Open **http://127.0.0.1:8081**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
 
 ## Switch the platform
