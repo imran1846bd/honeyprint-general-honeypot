@@ -22,22 +22,22 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-width:420px}a
 .tag{display:inline-block;background:#e8eef3;padding:5px 10px;border-radius:4px;margin:8px 8px 8px 0}'''
 
 
-def read_findings(path, *, instance_id=None, limit=100, timeout=5):
+def read_findings(path, *, instance_id=None):
     if path is None: return []
-    connection = sqlite3.connect(Path(path).resolve(strict=True).as_uri() + '?mode=ro', uri=True, timeout=timeout)
+    connection = sqlite3.connect(Path(path).resolve(strict=True).as_uri() + '?mode=ro', uri=True, timeout=5)
     try:
         connection.execute('PRAGMA query_only=ON')
         query = 'SELECT sequence,payload FROM findings'
         args = []
         if instance_id:
             query += ' WHERE instance_id = ?'; args.append(instance_id)
-        query += ' ORDER BY sequence DESC LIMIT ?'; args.append(limit)
+        query += ' ORDER BY sequence DESC LIMIT 100'
         return [{'sequence': seq, 'finding': validate_finding(json.loads(payload))}
                 for seq, payload in connection.execute(query, args).fetchall()]
     finally: connection.close()
 
 
-def render_page(rows, findings, *, instance_id='', event_type='', cursor=0, page_size=100):
+def render_page(rows, findings, *, instance_id='', event_type='', cursor=0):
     def text(value): return escape(str(value), quote=True)
     body = [f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HoneyPrint Evidence</title><style>{_STYLE}</style></head><body><main>',
             '<h1>HoneyPrint Evidence</h1><p class="sub">Browse captured interactions and derived rule findings.</p>',
@@ -54,10 +54,10 @@ def render_page(rows, findings, *, instance_id='', event_type='', cursor=0, page
                     [row['sequence'],e['timestamp'],e['instance_id'],e['event_type'],e['action'],e['outcome']])
                     + '<td><details><summary>Metadata</summary><pre>'+details+'</pre></details></td></tr>')
     body.append('</tbody></table></div>')
-    if len(rows) == page_size:
+    if len(rows) == 100:
         query = urlencode({'instance': instance_id, 'type': event_type, 'after': rows[-1]['sequence']})
-        body.append('<p><a href="/?'+text(query)+'">Next '+str(page_size)+' records</a></p>')
-    body.append('<h2>Rule findings</h2><p class="sub">Indicators require context and do not confirm an attack. Latest '+str(page_size)+' findings for this instance filter.</p><div class="table-wrap"><table><thead><tr><th>Instance</th><th>Severity</th><th>Rule</th><th>Observation</th></tr></thead><tbody>')
+        body.append('<p><a href="/?'+text(query)+'">Next 100 records</a></p>')
+    body.append('<h2>Rule findings</h2><p class="sub">Indicators require context and do not confirm an attack. Latest 100 findings for this instance filter.</p><div class="table-wrap"><table><thead><tr><th>Instance</th><th>Severity</th><th>Rule</th><th>Observation</th></tr></thead><tbody>')
     for row in findings:
         f = row['finding']
         body.append('<tr>'+''.join('<td>'+text(f[k])+'</td>' for k in ('instance_id','severity','rule_id','message'))+'</tr>')
@@ -65,14 +65,11 @@ def render_page(rows, findings, *, instance_id='', event_type='', cursor=0, page
     return ''.join(body)
 
 
-def create_server(database: Path, *, alerts: Path | None = None, port=8090, page_size=100, request_timeout=2, sqlite_timeout=5):
-    from core.runtime_settings import resolve_settings
-    resolve_settings({'dashboard_page_size': page_size, 'dashboard_request_timeout_seconds': request_timeout,
-                      'sqlite_busy_timeout_seconds': sqlite_timeout})
+def create_server(database: Path, *, alerts: Path | None = None, port=8090):
     database = Path(database).resolve(strict=True)
     alerts = Path(alerts).resolve(strict=True) if alerts else None
     class Handler(BaseHTTPRequestHandler):
-        def setup(self): super().setup(); self.connection.settimeout(request_timeout)
+        def setup(self): super().setup(); self.connection.settimeout(2)
         def log_message(self, *args): pass
         def respond(self, status, content, content_type='application/json'):
             body = json.dumps(content).encode() if content_type == 'application/json' else content.encode()
@@ -84,10 +81,6 @@ def create_server(database: Path, *, alerts: Path | None = None, port=8090, page
         def do_GET(self):
             try:
                 route = urlsplit(self.path)
-                if route.path == '/health':
-                    with EvidenceReader(database, timeout=sqlite_timeout) as reader:
-                        reader.read_events(limit=1)
-                    self.respond(200, {'ready': True}); return
                 if route.path not in ('/', '/api/events', '/api/alerts'):
                     self.respond(404, {'error': 'unknown endpoint'}); return
                 query = parse_qs(route.query, max_num_fields=8)
@@ -96,14 +89,14 @@ def create_server(database: Path, *, alerts: Path | None = None, port=8090, page
                 kind = query.get('type', [''])[0]
                 cursor = int(query.get('after', ['0'])[0])
                 if len(instance) > 256 or len(kind) > 256 or cursor < 0: raise ValueError()
-                with EvidenceReader(database, timeout=sqlite_timeout) as reader:
-                    rows = reader.read_events(after_sequence=cursor, limit=page_size,
+                with EvidenceReader(database) as reader:
+                    rows = reader.read_events(after_sequence=cursor, limit=100,
                                               instance_id=instance or None, event_type=kind or None)
-                findings = read_findings(alerts, instance_id=instance or None, limit=page_size, timeout=sqlite_timeout)
+                findings = read_findings(alerts, instance_id=instance or None)
                 if route.path == '/api/events': self.respond(200, rows)
                 elif route.path == '/api/alerts': self.respond(200, findings)
                 else: self.respond(200, render_page(rows, findings, instance_id=instance,
-                                                    event_type=kind, cursor=cursor, page_size=page_size), 'text/html; charset=utf-8')
+                                                    event_type=kind, cursor=cursor), 'text/html; charset=utf-8')
             except (ValueError, OverflowError): self.respond(400, {'error': 'invalid query or evidence'})
             except (OSError, sqlite3.Error): self.respond(503, {'error': 'evidence unavailable'})
         def do_POST(self): self.respond(405, {'error': 'dashboard is read only'})
@@ -115,14 +108,10 @@ def main(argv=None):
     parser.add_argument('--database', type=Path, required=True)
     parser.add_argument('--alerts', type=Path)
     parser.add_argument('--port', type=int, default=8090)
-    parser.add_argument('--page-size', type=int, default=100)
-    parser.add_argument('--request-timeout', type=float, default=2)
-    parser.add_argument('--sqlite-timeout', type=float, default=5)
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535: parser.error('Port must be between 1 and 65535')
     try:
-        with create_server(args.database, alerts=args.alerts, port=args.port, page_size=args.page_size,
-                           request_timeout=args.request_timeout, sqlite_timeout=args.sqlite_timeout) as server:
+        with create_server(args.database, alerts=args.alerts, port=args.port) as server:
             print(f'Evidence dashboard: http://127.0.0.1:{args.port}', flush=True)
             try: server.serve_forever(poll_interval=0.2)
             except KeyboardInterrupt: pass
