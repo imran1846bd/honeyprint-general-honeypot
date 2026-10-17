@@ -1,0 +1,42 @@
+# OctoPrint-specific configuration. Loaded only for octoprint (or all).
+# Restart ./run.sh after editing. Common values remain in .env:
+# port, printer name/geometry, preheat, camera, logs, upload limits and analysis.
+# Paths below resolve relative to the project root, not this YAML directory.
+schema_version: 1
+
+# Local OctoPrint source; blank uses the framework's pinned packaged release.
+source: plat/OctoPrint-dev
+# Blank lets the launcher prepare/select the matching Python environment.
+python: ''
+
+# Native OctoPrint option names. Unknown fields/types are rejected at startup.
+# Managed virtual printer only; not applied to Klipper or custom platforms.
+settings:
+  appearance:
+    # default | red | orange | yellow | green | blue | violet
+    color: default
+    showFahrenheitAlso: false
+
+  virtual_printer:
+    # Identity reported by the simulated firmware (M115), not the UI printer name.
+    firmwareName: Virtual Marlin 1.0
+    # Output-buffer pause in seconds; range 0..1.
+    throttle: 0.01
+    # Emit idle "wait" messages; interval in seconds, range 0.1..60.
+    sendWait: false
+    waitInterval: 1.0
+    # Simulated serial receive buffer (bytes, 16..65536).
+    rxBuffer: 64
+    # Queued simulated commands (1..1024).
+    commandBuffer: 4
+    # M112 kills the simulated firmware; reconnect may be needed afterward.
+    supportM112: true
+    # Echo M117 display messages back to the host.
+    echoOnM117: true
+    # Emit "busy" responses during work; interval in seconds, range 0.1..60.
+    sendBusy: false
+    busyInterval: 2.0
+    # Simulate firmware reset when connecting.
+    simulateReset: true
+    # Whether "ok" is sent before command output instead of after/inline.
+    okBeforeCommandOutput: false
