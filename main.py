@@ -49,7 +49,7 @@ def main(argv: Optional[Sequence[str]] = None, *,
         active_registry = registry if registry is not None else create_builtin_registry(
             runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
             attach_api_key_env=args.attach_api_key_env, custom_code=args.custom_code,
-            custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url, runtime_settings=config.get('runtime', {}),
+            custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url,
         )
         validate_config(config, active_registry)
         if args.command == 'validate':
