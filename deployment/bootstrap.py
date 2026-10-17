@@ -12,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 def install_selected(config, octoprint_python=None, *, octoprint_source=None, klipper_source=None):
     """Prepare dependencies only; platform lifecycle remains owned by the core."""
     platforms = {item['platform'] for item in config['instances']}
+    if 'klipper' in platforms:
+        try:
+            result = subprocess.run(['docker', 'info', '--format', '{{.OSType}}'],
+                                    capture_output=True, text=True, timeout=30, check=True)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise AdapterError('Docker engine is unavailable. Start Docker Desktop and retry.') from error
+        if result.stdout.strip() != 'linux':
+            raise AdapterError('Klipper requires Docker running Linux containers')
     selected = octoprint_python
     if octoprint_source or klipper_source:
         from deployment.local_sources import prepare_sources
@@ -34,7 +42,6 @@ def install_selected(config, octoprint_python=None, *, octoprint_source=None, kl
                             str(ROOT / 'requirements-octoprint.txt')], check=True)
             subprocess.run([str(selected), '-c', check], check=True)
     if 'klipper' in platforms:
-        subprocess.run(['docker', 'info', '--format', '{{.OSType}}'], check=True)
         try:
             KlipperEnvironment.prepare()
         except AdapterError:
