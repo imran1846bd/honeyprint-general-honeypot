@@ -9,7 +9,7 @@ import urllib.request
 
 
 class SourceCamera:
-    def __init__(self, root, python, source, *, video=None):
+    def __init__(self, root, python, source):
         self.root = Path(root)
         self.python = Path(python)
         self.script = Path(source) / 'tools/simulated_webcam.py'
@@ -18,8 +18,7 @@ class SourceCamera:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             self.port = probe.getsockname()[1]
-        self.video = Path(video) if video is not None else Path(source) / 'simulated_uploaded_prusa.mp4'
-        if video is not None and not self.video.is_file(): raise ValueError('Camera video does not exist')
+        self.video = Path(source) / "simulated_uploaded_prusa.mp4"
         self.process = None
         self.log = None
 
