@@ -39,8 +39,6 @@ HONEYPRINT_PLATFORM=octoprint
 HONEYPRINT_PORT=8081
 HONEYPRINT_RUNTIME_DIR=.honeyprint/quickstart
 HONEYPRINT_ANALYST_ENABLED=false
-HONEYPRINT_CUSTOM_CODE=
-HONEYPRINT_CUSTOM_API_URL=
 ```
 
 Start the selected honeypot:
@@ -60,10 +58,10 @@ Change `HONEYPRINT_PLATFORM`, stop the current run, then launch again:
 | `octoprint` | Native OctoPrint with its Virtual Printer and managed audit capture |
 | `klipper` | Mainsail with Moonraker and Klipper running compiled AVR firmware through SimulAVR |
 | `custom`, with code and API fields blank | Built-in custom printer lab |
-| `custom`, with `HONEYPRINT_CUSTOM_CODE` | Your Python HTTP honeypot behind the evidence bridge |
-| `custom`, with `HONEYPRINT_CUSTOM_API_URL` | An HTTP bridge to your already running service |
+| `custom`, with `code` in `configs/platforms/custom.yaml` | Your Python HTTP honeypot behind the evidence bridge |
+| `custom`, with `api_url` in `configs/platforms/custom.yaml` | An HTTP bridge to your already running service |
 
-The URL is controlled by `HONEYPRINT_PORT`, not the platform name. `HONEYPRINT_INSTANCE_ID` optionally gives the instance your own name. Leave it blank to use the selected platform's default identity. A new platform implementation that is not built in can use the custom HTTP contract or a registered SDK adapter; entering an arbitrary platform name does not generate its implementation.
+The URL is controlled by `HONEYPRINT_PORT`, not the platform name. `HONEYPRINT_INSTANCE_ID` optionally gives the instance your own name. Use `auto` (or blank for compatibility) to keep the selected platform's default identity. A new platform implementation that is not built in can use the custom HTTP contract or a registered SDK adapter; entering an arbitrary platform name does not generate its implementation.
 
 Keep `./run.sh` running in the foreground of your terminal. Closing that terminal window or tab sends a hangup signal; the launcher then gracefully stops its owned honeypot services and drains pending evidence. Cleanup may take a few seconds. External services selected through a custom API URL remain running.
 
@@ -77,20 +75,17 @@ Wait for shutdown to finish, then run `./run.sh` again. If you changed `HONEYPRI
 
 ## Use your own custom code
 
-Select a trusted Python HTTP entry file in the same `.env`:
+Set `HONEYPRINT_PLATFORM=custom` in the common `.env`, then edit `configs/platforms/custom.yaml`:
 
-```dotenv
-HONEYPRINT_PLATFORM=custom
-HONEYPRINT_PORT=8081
-HONEYPRINT_CUSTOM_CODE=examples/custom_server.py
-HONEYPRINT_CUSTOM_API_URL=
-HONEYPRINT_CUSTOM_PYTHON=
-HONEYPRINT_CUSTOM_HEALTH_PATH=/
-HONEYPRINT_RUNTIME_DIR=.honeyprint/quickstart
-HONEYPRINT_ANALYST_ENABLED=false
+```yaml
+schema_version: 1
+code: examples/custom_server.py
+api_url: ''
+python: ''
+health_path: /
 ```
 
-Replace the example path with your own entry file. Relative paths resolve from the env file's directory. Set `HONEYPRINT_CUSTOM_PYTHON` if your code requires another interpreter with its dependencies already installed.
+Replace `code` with your trusted entry file. Relative platform paths resolve from the project root containing `configs/platforms/`. Set `python` when your code requires another interpreter; an empty value uses the framework interpreter.
 
 Your server must:
 
@@ -102,16 +97,14 @@ The framework supplies `HONEYPRINT_PROFILE_JSON` for the selected printer profil
 
 ## Use an existing custom API
 
-If your service is already running, configure its HTTP(S) base URL instead of a code path:
+Set `HONEYPRINT_PLATFORM=custom` in `.env`. In `configs/platforms/custom.yaml`, select an existing HTTP(S) service instead of code:
 
-```dotenv
-HONEYPRINT_PLATFORM=custom
-HONEYPRINT_PORT=8081
-HONEYPRINT_CUSTOM_CODE=
-HONEYPRINT_CUSTOM_API_URL=http://127.0.0.1:5000
-HONEYPRINT_CUSTOM_HEALTH_PATH=/
-HONEYPRINT_RUNTIME_DIR=.honeyprint/quickstart
-HONEYPRINT_ANALYST_ENABLED=false
+```yaml
+schema_version: 1
+code: ''
+api_url: http://127.0.0.1:5000
+python: ''
+health_path: /
 ```
 
 The service can run on another port or host, and the URL can include a base path. Users interact with **http://127.0.0.1:8081**; HoneyPrint forwards requests to the configured service and records methods and response status in the shared database. Stopping HoneyPrint closes its local bridge and leaves the external service running. Requests sent directly to the upstream service bypass HoneyPrint capture.
@@ -126,10 +119,11 @@ Every selection writes normalized framework evidence to the same runtime directo
 .honeyprint/quickstart/
   events.sqlite3        # Shared framework and observed platform events
   analysis.sqlite3      # Rule findings from the analysis watcher
-  <instance-id>/        # Platform-specific console logs and retained artifacts
+  artifacts/<instance-id>/ # Framework-retained G-code artifacts
+  <instance-id>/        # Platform-specific console logs
 ```
 
-Events retain platform and instance identity, so records from earlier selections remain distinguishable after a switch. Custom HTTP capture records methods, route category and status without request bodies or credentials. Platform console logs and source-supplied audit plugins can have separate files; the shared database is the framework's normalized evidence store. The analysis watcher runs even when its web dashboard is disabled.
+Events retain platform and instance identity, so records from earlier selections remain distinguishable after a switch. Custom HTTP capture records methods, route category and status without request bodies or credentials. Platform console logs and source-supplied audit plugins can have separate files; the shared database is the framework's normalized evidence store. The analysis watcher is controlled by `HONEYPRINT_ANALYSIS_ENABLED`, independently of the web dashboard. With analysis disabled, the dashboard still serves evidence and shows no findings.
 
 An analyst dashboard is optional. Enable it only when you want a separate interface for reviewing evidence:
 
@@ -142,7 +136,7 @@ This adds the read-only analyst interface at http://127.0.0.1:8090. It is not re
 
 ## Profiles and advanced configuration
 
-Optional `HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated printer profile values. Blank values preserve the profile defaults.
+`HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated printer profile values. The common template supplies explicit geometry defaults (220 × 220 × 250 mm, 0.4 mm nozzle, heated bed). Blank geometry values remain supported to inherit a selected profile. Current profiles describe single-extruder rectangular geometry; new motion/thermal/sensor models are not introduced by these controls.
 
 `.env` is a literal settings file, never executed as a shell script. Unknown and duplicate keys are rejected. Process environment values override the file, and explicit CLI settings override generated defaults. Use `--env-file /path/to/settings.env` to select another env file. Env files remain local and are excluded from Git.
 
@@ -152,18 +146,76 @@ Existing YAML configurations remain available through `./run.sh --config /path/t
 
 Use `./run.sh --duration 30` for a bounded run. `--no-bootstrap` requires already prepared dependencies, and `--octoprint-python` selects an existing OctoPrint interpreter. Startup waits for persisted lifecycle readiness; when enabled, it also checks the analyst dashboard before reporting readiness. A failed startup shuts down owned children and returns a nonzero exit code.
 
+## Common printer, storage and ingress options
+
+The common `.env` also supports these options; restart to apply changes:
+
+| Option | Default | Applied behavior |
+| --- | --- | --- |
+| `HONEYPRINT_PRINTER_NAME` | HoneyPrint Virtual Lab | Shared profile name; OctoPrint appearance/profile, built-in lab title/state, custom-process profile contract and Klipper bridge profile endpoint. Does not rename an external API or Mainsail's own UI preferences. |
+| `HONEYPRINT_ARTIFACT_DIR` | `auto` | `<runtime>/artifacts`, or an explicit absolute/path relative to `.env`; each instance has a subdirectory. All framework artifact stores use it. No automatic migration. |
+| `HONEYPRINT_UPLOAD_MAX_BYTES` | 1048576 | Upload admission limit. OctoPrint native upload setting; Klipper decoded file limit plus bounded multipart framing; lab JSON job body and custom proxy upload bodies. Existing parser/retention ceilings still apply. |
+| `HONEYPRINT_REQUEST_MAX_BYTES` | 65536 | Normal HTTP request-body limit in managed OctoPrint, Klipper bridge, lab and custom proxy; not a WebSocket frame or response-size setting. |
+| `HONEYPRINT_DISK_WARNING_BYTES` | 1073741824 | Warn on low free space at runtime/artifact locations, once per low-space episode. `0` disables. Never deletes files or shuts the machine down. |
+| `HONEYPRINT_PREHEAT_HOTEND_C` / `HONEYPRINT_PREHEAT_BED_C` | 200 / 60 | User-activated targets, not startup heating or physical temperature ceilings. OctoPrint Temperature preset; lab Preheat button/`POST /api/preheat` with `{}`; Klipper `POST /printer/honeyprint/preheat` with `{}`. A printer without a heated bed skips the bed command. |
+| `HONEYPRINT_CAMERA_ENABLED` | true | Allow the managed OctoPrint camera when available; false disables it. Other backends do not gain a framework camera from this flag. |
+| `HONEYPRINT_CAMERA_SOURCE` | `auto` | Preserve source helper/video selection. OctoPrint can use a local video with its source camera helper or an HTTP(S) stream URL. URL display does not verify remote stream availability or add snapshot support. Explicit sources are rejected for other backends. |
+
+`GET /server/honeyprint/profile` exposes the selected shared profile through the Klipper HTTP bridge. Generic custom code receives the profile JSON as before; external APIs retain control of their own printer identity and heaters. Read-only attached OctoPrint does not apply camera, preheat or ingress overrides; non-default values are rejected. Non-default preheat settings for custom code/API deployments are rejected because those deployments have no standard heater command contract. Their unchanged default preset values are inactive.
+
+Request limits apply at the owned HTTP entry point, not to direct requests to an external upstream. The custom proxy classifies multipart/form-data and application/octet-stream bodies as uploads; other bodies use the request limit. Artifact retention is distinct from upload admission. A lower retention limit can reject an otherwise size-valid Klipper/lab artifact upload. Missing parent directories for retained artifacts are created on first store preparation.
+
+## Common runtime controls
+
+Every active assignment in `.env.example` is wired to a consumer. `.env` holds common settings only; platform-specific code/source/interpreter/API paths belong in the selected platform YAML. Legacy platform-specific env keys are accepted for compatibility, but are absent from the common file and template.
+
+| Common group | Effect |
+| --- | --- |
+| Evidence database names, SQLite timeout | Shared by runtime, readiness checks, analysis and dashboard; names must be distinct plain `.sqlite3` filenames |
+| Run duration | `0` means until stop; positive seconds start after launcher readiness; explicit `--duration` wins |
+| Startup/readiness/shutdown timeouts | Bound launcher readiness, core post-start readiness and graceful child-process waiting; adapter startup/builds have their own platform limits |
+| Health and collector intervals | Independently schedule health checks and evidence draining |
+| Capture flags | Filter supported observations; framework lifecycle evidence is always persisted |
+| Queue/batch/drain limits | Configure common queue and collection work; overflow or undrained shutdown evidence fails the run |
+| Artifact limits | Per framework artifact store, not a platform disk quota; per-file limit is 1 byte–1 MiB due to current G-code ingestion limits |
+| Analysis options | Enable/disable analysis and set its polling interval/batch size |
+| Analyst options | Enable/disable UI and set port, pagination, connection timeout and startup wait |
+
+Changing runtime paths or database names starts using the new destination; old evidence is retained and is not automatically migrated. Restart after changing configuration. No upload is executed as framework code unless explicitly selected as trusted custom code in its platform YAML.
+
+Generated YAML carries these controls in its validated `runtime` mapping. Explicit `--config` uses that YAML's `runtime` mapping (or defaults), bypassing `.env` selection. Values outside the ranges documented in `.env.example` fail before dependency bootstrap. Platform-specific `.yaml` files are configuration data, never Python imports.
+
 ## Use your local platform source
 
-The same launcher can build trusted local OctoPrint and Klipper source folders. To select your source folders, set:
+The common `.env` contains no platform source paths. The launcher automatically reads only `configs/platforms/<selected-platform>.yaml` (all three in advanced `all` mode).
 
-```dotenv
-HONEYPRINT_PLATFORM=octoprint
-HONEYPRINT_OCTOPRINT_SOURCE=/absolute/path/to/plat/OctoPrint-dev
-HONEYPRINT_KLIPPER_SOURCE=/absolute/path/to/plat/klipper-master
-HONEYPRINT_OCTOPRINT_PYTHON=
+For OctoPrint, edit `configs/platforms/octoprint.yaml`:
+
+```yaml
+schema_version: 1
+source: plat/OctoPrint-dev
+python: ''
+settings:
+  appearance:
+    color: default
+    showFahrenheitAlso: false
+  virtual_printer:
+    firmwareName: Virtual Marlin 1.0
+    rxBuffer: 64
+    commandBuffer: 4
+    supportM112: true
 ```
 
-Run `./run.sh`. Change only `HONEYPRINT_PLATFORM` to `octoprint`, `klipper` or `custom` when running one platform; env source paths for other platforms are ignored. Relative source paths resolve from the env file's directory. `--octoprint-source` and `--klipper-source` also accept source folders. Source selection requires bootstrap; it cannot be combined with `--no-bootstrap`.
+The shipped OctoPrint YAML documents all supported options and bounds, including wait/busy responses, output timing, reset-on-connect and M117 echo. These settings apply to the managed virtual printer on restart. Common identity, geometry, preheat, camera and evidence controls stay in `.env`. Unknown keys and invalid values are rejected; arbitrary native configuration merges are not supported.
+
+For Klipper, edit `configs/platforms/klipper.yaml`:
+
+```yaml
+schema_version: 1
+source: plat/klipper-master
+```
+
+An empty `source` uses the pinned bundled installation flow. Local source paths were preserved during migration; they must exist when selected. Paths in these YAML files are relative to their project root. If an external env-file directory has no `configs/platforms/` folder, the launcher uses this project's platform files; if that folder exists, the selected YAML must exist and validate. Other platforms' files are not read. CLI source arguments remain available; source selection requires bootstrap and cannot be combined with `--no-bootstrap`.
 
 HoneyPrint hashes and copies the source into `.honeyprint/local-sources`, preserving the original folder. OctoPrint is installed into a separate environment using that source's declared dependencies. Klipper is compiled together with its host software into a separate Docker image, retaining the pinned Moonraker and SimulAVR components and the existing isolated runtime. Archive downloads receive a local snapshot Git commit so native MCU readiness can verify the compiled revision; this is not an upstream commit identifier. Selected source hashes are recorded in deployment recipe metadata. A source change produces a new cache identity on the next launch.
 
