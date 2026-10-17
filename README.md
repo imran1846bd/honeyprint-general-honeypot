@@ -180,46 +180,15 @@ Configuration selects capabilities that have already been implemented. It cannot
 - **Managed mode:** the framework owns the resources it starts.
 - **Attach mode:** the framework observes externally managed software and preserves its processes and resources.
 
-## 2. Generalized reference architecture
+## 2. General framework architecture
 
-```text
-+------------------------------------------------------------------------+
-|                    User-defined YAML configuration                     |
-|     Printer profile | Process stages | Platform | Sensors | Decoys     |
-+------------------------------------------------------------------------+
-                                    |
-                                    v
-+------------------------------------------------------------------------+
-|                        Honeypot Framework Core                         |
-| Load | Validate | Resolve dependencies | Registry | Build | Lifecycle  |
-+------------------------------------------------------------------------+
-                                    |
-                                    v
-+----------------------------------+  +----------------------------------+
-|    Manufacturing Stage Engine    |  |   Service and Platform Engine    |
-|     Intake | Prepare | Build     |  |       Real software | APIs       |
-|      Post-process | Inspect      |  |      Firmware integrations       |
-+----------------------------------+  +----------------------------------+
-+----------------------------------+  +----------------------------------+
-|    Printer Simulation Engine     |  |   Behavior and Security Engine   |
-|     Thermal | Motion | Power     |  |     Authentication | Decoys      |
-|             Sensors              |  |           Event rules            |
-+----------------------------------+  +----------------------------------+
-                                    |
-                                    v
-+------------------------------------------------------------------------+
-|                      Configured honeypot instance                      |
-|       Platform software + simulation + workflow + isolated state       |
-+------------------------------------------------------------------------+
-                                    |
-                                    v
-+------------------------------------------------------------------------+
-|                Central logging, telemetry and analysis                 |
-|     Normalized events | Persistent storage | Dashboard | Analysis      |
-+------------------------------------------------------------------------+
-```
+![HoneyPrint general framework architecture](docs/images/generalized-architecture.png)
 
-The four engines are logical responsibilities; they do not require four separate processes. Observation uses a separate, non-blocking telemetry pipeline.
+*Figure 1. General HoneyPrint architecture: exposed interfaces, management, platform adapters, device/control emulation, physical process simulation, and a unified evidence pipeline. OctoPrint, Klipper, Marlin-like, vendor-specific and custom stacks are example platform realizations.*
+
+This figure is the reference architecture. The implementation status above identifies which parts currently run; other blocks represent extension points or research targets.
+
+The five technical stages in the figure describe exposure, interaction, device emulation, physical-process simulation and data capture. They are distinct from the five manufacturing lifecycle stages below. The diagram describes responsibilities, not a requirement for separate processes; observation uses a separate, non-blocking telemetry pipeline.
 
 ### AM reference-model mapping
 
