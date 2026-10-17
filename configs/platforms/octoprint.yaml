@@ -2,6 +2,8 @@
 # Restart ./run.sh after editing. Common values remain in .env:
 # port, printer name/geometry, preheat, camera, logs, upload limits and analysis.
 # Paths below resolve relative to the project root, not this YAML directory.
+# Example: change firmwareName below to show a different identity in the
+# virtual printer's M115 response; restart the launcher to apply the change.
 schema_version: 1
 
 # Local OctoPrint source; blank uses the framework's pinned packaged release.
