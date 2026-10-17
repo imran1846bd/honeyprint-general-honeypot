@@ -10,6 +10,7 @@ IMAGE = 'honeyprint-klipper:1'
 PINS = {'klipper': os.environ.get('_HONEYPRINT_KLIPPER_REV', 'e2b99a9159f992169c1ba53029dec020e850cc99'),
         'moonraker': '9e676eba6b02661a4dfa3ec6e7ac3f3504498e6d',
         'simulavr': '32985f745c237bf8dcd2718235d01c8b1fb0491d'}
+CONFIG_SCHEMA = '2'
 
 
 def docker(*args, timeout=30):
@@ -40,13 +41,17 @@ class KlipperEnvironment:
         source_hash = os.environ.get('_HONEYPRINT_KLIPPER_SOURCE_SHA256')
         if source_hash and labels.get('org.honeyprint.klipper.source.sha256') != source_hash:
             raise AdapterError('Klipper image does not match the selected local source snapshot')
+        if labels.get('org.honeyprint.klipper.config.schema') != CONFIG_SCHEMA:
+            raise AdapterError('Klipper image lacks the current configuration schema')
         if info['Config']['User'] != '10001:10001':
             raise AdapterError('Klipper image must use the unprivileged runtime account')
         token = uuid.uuid4().hex
         name = 'honeyprint-klipper-' + token
         return cls(token, info['Id'], name, name + '-network')
 
-    def start(self, profile):
+    def start(self, profile, settings=None):
+        from deployment.docker.klipper.settings import resolve_klipper_settings
+        native = resolve_klipper_settings(settings)
         try:
             docker('network', 'create', '--internal', '--label',
                    'org.honeyprint.owner=' + self.token, self.network)
@@ -58,7 +63,8 @@ class KlipperEnvironment:
                    '--log-opt=max-size=10m', '--log-opt=max-file=3',
                    '--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,uid=10001,gid=10001,mode=0700',
                    '--tmpfs=/data:rw,nosuid,nodev,noexec,size=256m,uid=10001,gid=10001,mode=0700',
-                   '--env', 'HONEYPRINT_PROFILE_JSON=' + json.dumps(profile), self.image)
+                   '--env', 'HONEYPRINT_PROFILE_JSON=' + json.dumps(profile),
+                   '--env', 'HONEYPRINT_KLIPPER_SETTINGS_JSON=' + json.dumps(native), self.image)
             self.created_container = True
         except AdapterError:
             self.stop()
