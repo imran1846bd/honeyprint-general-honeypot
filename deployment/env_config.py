@@ -4,7 +4,6 @@ from pathlib import Path
 import re
 from core.config_loader import load_config
 from core.profile_loader import load_profile
-from core.runtime_settings import DEFAULTS, settings_from_env
 
 ROOT=Path(__file__).resolve().parents[1]
 KEYS={'HONEYPRINT_PLATFORM','HONEYPRINT_PORT','HONEYPRINT_DASHBOARD_PORT','HONEYPRINT_PROFILE',
@@ -12,9 +11,6 @@ KEYS={'HONEYPRINT_PLATFORM','HONEYPRINT_PORT','HONEYPRINT_DASHBOARD_PORT','HONEY
       'HONEYPRINT_HEATED_BED','HONEYPRINT_RUNTIME_DIR','HONEYPRINT_OCTOPRINT_PYTHON',
       'HONEYPRINT_CUSTOM_CODE','HONEYPRINT_CUSTOM_PYTHON','HONEYPRINT_CUSTOM_HEALTH_PATH',
       'HONEYPRINT_CUSTOM_API_URL','HONEYPRINT_ANALYST_ENABLED','HONEYPRINT_INSTANCE_ID','HONEYPRINT_OCTOPRINT_SOURCE','HONEYPRINT_KLIPPER_SOURCE'}
-KEYS |= {'HONEYPRINT_' + name.upper() for name in DEFAULTS}
-KEYS.add('HONEYPRINT_PRINTER_NAME')
-KEYS |= {'HONEYPRINT_CAPTURE_REQUESTS', 'HONEYPRINT_CAPTURE_COMMANDS', 'HONEYPRINT_CAPTURE_STATE_CHANGES'}
 
 
 def read_env(path):
@@ -59,21 +55,8 @@ def build_config(values,base,output):
     platform=values.get('HONEYPRINT_PLATFORM','octoprint').strip().lower()
     names={'octoprint':'octoprint','klipper':'klipper','custom':'custom'}
     if platform not in (*names,'all'):raise ValueError('HONEYPRINT_PLATFORM must be all, octoprint, klipper or custom')
-    from deployment.platform_config import load_platform_settings
-    platform_values = load_platform_settings(platform, base)
-    # Legacy explicitly supplied env keys remain compatible, but are absent from the common template.
-    values = {**platform_values, **values}
-    settings = settings_from_env(values)
-    for key in ('artifact_dir','camera_source'):
-        value=settings[key]
-        if value != 'auto' and not (key=='camera_source' and value.startswith(('http://','https://'))):
-            p=Path(value).expanduser()
-            settings[key]=str(p.absolute() if p.is_absolute() else (base/p).absolute())
-    if settings['camera_source'] != 'auto' and not settings['camera_source'].startswith(('http://','https://')):
-        if not Path(settings['camera_source']).is_file(): raise ValueError('Camera video file does not exist')
     config=load_config(ROOT/'configs/instances/all.yaml' if platform=='all' else ROOT/f'configs/instances/{names[platform]}.yaml')
     profile=load_profile(path('HONEYPRINT_PROFILE',str(ROOT/'configs/profiles/virtual_lab.yaml')))
-    if values.get('HONEYPRINT_PRINTER_NAME'): profile['name']=values['HONEYPRINT_PRINTER_NAME']
     for key,dimension in [('HONEYPRINT_WIDTH','width'),('HONEYPRINT_DEPTH','depth'),('HONEYPRINT_HEIGHT','height')]:
         if values.get(key):profile['volume'][dimension]=float(values[key])
     if values.get('HONEYPRINT_NOZZLE'):profile['nozzle_diameter']=float(values['HONEYPRINT_NOZZLE'])
@@ -83,9 +66,7 @@ def build_config(values,base,output):
         profile['heated_bed']=value=='true'
     profile_path=output/'profile.yaml';profile_path.write_text(yaml.safe_dump(profile,sort_keys=False))
     load_profile(profile_path)
-    instance_id = values.get('HONEYPRINT_INSTANCE_ID', '')
-    if instance_id == 'auto': instance_id = ''
-    if platform=='all' and (values.get('HONEYPRINT_PORT') or instance_id):
+    if platform=='all' and (values.get('HONEYPRINT_PORT') or values.get('HONEYPRINT_INSTANCE_ID')):
         raise ValueError('A single port or instance ID requires selection of one platform')
     if values.get('HONEYPRINT_CUSTOM_CODE') and values.get('HONEYPRINT_CUSTOM_API_URL'):
         raise ValueError('Choose a custom code path or API URL, not both')
@@ -93,9 +74,7 @@ def build_config(values,base,output):
     if analyst not in ('true', 'false'):raise ValueError('HONEYPRINT_ANALYST_ENABLED must be true or false')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
-        if instance['platform'] == 'octoprint':
-            instance['octoprint_settings'] = platform_values['_octoprint_settings']
-        if instance_id:instance['id']=instance_id
+        if values.get('HONEYPRINT_INSTANCE_ID'):instance['id']=values['HONEYPRINT_INSTANCE_ID']
         if platform != 'all':instance['services']['web_port']=port(values.get('HONEYPRINT_PORT'),8081)
         if instance['platform']=='custom_lab' and values.get('HONEYPRINT_CUSTOM_CODE'):
             entry=path('HONEYPRINT_CUSTOM_CODE')
@@ -105,12 +84,6 @@ def build_config(values,base,output):
             from adapters.custom.api_adapter import parse_api_url
             parse_api_url(values['HONEYPRINT_CUSTOM_API_URL'])
             instance.update(platform='custom', deployment='attach', simulation='custom_api', stages=[])
-    config['runtime'] = settings
-    for flag in ('capture_requests', 'capture_commands', 'capture_state_changes'):
-        key = 'HONEYPRINT_' + flag.upper()
-        raw = values.get(key, str(config['telemetry'][flag])).lower()
-        if raw not in ('true', 'false'): raise ValueError(f'{key}: expected true or false')
-        config['telemetry'][flag] = raw == 'true'
     config_path=output/'config.yaml';config_path.write_text(yaml.safe_dump(config,sort_keys=False))
     return {'config':config,'config_path':config_path,
             'runtime_dir':path('HONEYPRINT_RUNTIME_DIR',str(ROOT/'.honeyprint/quickstart')),
