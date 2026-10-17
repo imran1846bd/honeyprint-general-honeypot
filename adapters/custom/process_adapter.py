@@ -23,9 +23,7 @@ from core.profile_loader import load_profile
 class CustomProcessAdapter(PlatformAdapter):
     platform_id='custom'
     owned_platform_resources=True
-    def __init__(self,*,entry,python=None,health_path='/',runtime_dir=None,common_settings=None):
-        from core.runtime_settings import resolve_settings
-        self.common_settings=resolve_settings(common_settings)
+    def __init__(self,*,entry,python=None,health_path='/',runtime_dir=None):
         self.entry=Path(entry).absolute();self.python=Path(python or sys.executable).absolute()
         self.health_path=health_path;self.runtime_dir=Path(runtime_dir or '.honeyprint')
         self.process=None;self.server=None;self.thread=None;self.log_thread=None
@@ -86,11 +84,7 @@ class CustomProcessAdapter(PlatformAdapter):
                         if not self.path.startswith('/') or self.path.startswith('//') or len(self.path)>8192 or self.headers.get('Transfer-Encoding'):
                             raise ValueError()
                         length=int(self.headers.get('Content-Length','0'))
-                        ctype=self.headers.get('Content-Type','').split(';',1)[0].lower()
-                        upload=ctype in ('multipart/form-data','application/octet-stream')
-                        limit=adapter.common_settings['upload_max_bytes' if upload else 'request_max_bytes']
-                        if length>limit: raise OverflowError()
-                        if length<0: raise ValueError()
+                        if not 0<=length<=1048576:raise ValueError()
                         data=self.rfile.read(length)
                         if len(data)!=length:raise ValueError()
                         selected={key:self.headers[key] for key in ('Content-Type','Authorization','Cookie','Accept') if key in self.headers}
@@ -100,8 +94,6 @@ class CustomProcessAdapter(PlatformAdapter):
                         if len(body)>2097152:raise ValueError()
                         status=response.status
                         headers=[(key,value) for key,value in response.getheaders() if key.lower() in ('content-type','set-cookie','location')]
-                    except OverflowError:
-                        status=413;body=b'{"error":"request too large"}';self.close_connection=True
                     except Exception:status=502;body=b'{"error":"custom backend request failed"}'
                     finally:
                         if connection:connection.close()
