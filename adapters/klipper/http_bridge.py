@@ -21,7 +21,7 @@ GET_ROUTES={
 POST_ROUTES={
  '/printer/gcode/script','/printer/emergency_stop','/printer/restart','/printer/firmware_restart',
  '/printer/print/start','/printer/print/pause','/printer/print/resume','/printer/print/cancel',
- '/server/files/upload','/server/database/item','/printer/honeyprint/preheat',
+ '/server/files/upload','/server/database/item',
 }
 
 
@@ -55,9 +55,7 @@ class BridgeServer(ThreadingHTTPServer):
             raise AdapterError('Klipper bridge workers did not stop')
 
 
-def create_bridge(environment,port,emit,*,artifacts=None,frontend=None,common_settings=None,printer_profile=None):
-    from core.runtime_settings import resolve_settings
-    settings=resolve_settings(common_settings)
+def create_bridge(environment,port,emit,*,artifacts=None,frontend=None):
     class Handler(BaseHTTPRequestHandler):
         rbufsize=0
         def setup(self):
@@ -89,9 +87,7 @@ def create_bridge(environment,port,emit,*,artifacts=None,frontend=None,common_se
                 url=urlsplit(self.path)
                 if url.scheme or url.netloc or url.fragment or len(self.path)>8192: raise ValueError()
                 path=url.path;query=parse_qs(url.query,keep_blank_values=True)
-                if path=='/server/honeyprint/profile' and self.command=='GET':
-                    route=path;status=200;output=json.dumps(printer_profile or {}).encode()
-                elif frontend is not None and self.command=='GET' and not path.startswith(('/server/','/printer/','/machine/','/access/')):
+                if frontend is not None and self.command=='GET' and not path.startswith(('/server/','/printer/','/machine/','/access/')):
                     route='frontend'
                     if path=='/config.json':
                         output=json.dumps({'defaultLocale':'en','defaultMode':'dark','defaultTheme':'mainsail',
@@ -123,13 +119,13 @@ def create_bridge(environment,port,emit,*,artifacts=None,frontend=None,common_se
                         body=None;ctype=self.headers.get('Content-Type','application/json')
                         if post:
                             size=int(self.headers.get('Content-Length','0'))
-                            limit=settings['upload_max_bytes']+131072 if path=='/server/files/upload' else settings['request_max_bytes']
+                            limit=MAX_UPLOAD if path=='/server/files/upload' else 65536
                             if not 0<=size<=limit:
                                 raise OverflowError('Request exceeds limit')
                             body=self.rfile.read(size)
                             if len(body)!=size: raise ValueError('Incomplete body')
                             if path=='/server/files/upload':
-                                body,ctype,artifact=prepare_upload(body,ctype,artifacts,max_file_bytes=settings['upload_max_bytes'])
+                                body,ctype,artifact=prepare_upload(body,ctype,artifacts)
                             elif body:
                                 data=json.loads(body)
                                 if not isinstance(data,dict): raise ValueError()
@@ -144,20 +140,12 @@ def create_bridge(environment,port,emit,*,artifacts=None,frontend=None,common_se
                         if path=='/printer/print/start' and url.query:
                             filename=query.get('filename',[''])[0]
                             if '/' in filename or '\\' in filename or filename.startswith('.') or not filename.lower().endswith('.gcode'): raise ValueError()
-                        target=self.path
-                        if path=='/printer/honeyprint/preheat':
-                            if body and json.loads(body)!={}: raise ValueError()
-                            script=f"M104 S{settings['preheat_hotend_c']}"
-                            if printer_profile is None or printer_profile['heated_bed']: script+=f"\nM140 S{settings['preheat_bed_c']}"
-                            command_events(script,self.record)
-                            target='/printer/gcode/script';body=json.dumps({'script':script}).encode();ctype='application/json'
-                        status,content_type,output=request(environment,self.command,target,body,ctype)
+                        status,content_type,output=request(environment,self.command,self.path,body,ctype)
                         if artifact:
                             self.record({'source':'klipper','event_type':'file.artifact','action':'upload',
                                          'outcome':'accepted' if 200<=status<300 else 'rejected',
                                          'simulation':True,'metadata':artifact})
             except OverflowError:
-                self.close_connection=True
                 status=413;output=b'{"error":"request too large"}'
             except (ValueError,UnicodeError):
                 status=400;output=b'{"error":"invalid or unsupported data"}'
