@@ -47,6 +47,8 @@ class KlipperAdapter(PlatformAdapter):
     def validate(self, cfg, context):
         if cfg['deployment'] != 'managed' or cfg['simulation'] != 'avr_sim':
             raise AdapterError('Klipper supports managed AVR simulation only')
+        from deployment.docker.klipper.settings import resolve_klipper_settings
+        resolve_klipper_settings(cfg.get('klipper_settings', {}))
         load_profile(cfg['printer_profile'])
         validate_stages(cfg.get('stages', ()))
 
@@ -63,7 +65,7 @@ class KlipperAdapter(PlatformAdapter):
     def launch_or_attach(self, plan):
         if self.environment is None:
             raise AdapterError('Klipper adapter has not been prepared')
-        self.environment.start(self.profile)
+        self.environment.start(self.profile, plan['config'].get('klipper_settings'))
         try:
             self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: self.sink(event) if self.sink else None, artifacts=self.artifacts, frontend=self.frontend)
         except Exception:
