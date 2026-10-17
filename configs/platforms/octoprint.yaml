@@ -1,6 +1,9 @@
 # OctoPrint-specific configuration. Loaded only for octoprint (or all).
+# Select HONEYPRINT_PLATFORM=octoprint in .env to use this file.
 # Restart ./run.sh after editing. Common values remain in .env:
 # port, printer name/geometry, preheat, camera, logs, upload limits and analysis.
+# The common printer profile supplies the build volume, nozzle and heated bed;
+# the virtual printer stays enabled by the managed OctoPrint adapter.
 # Paths below resolve relative to the project root, not this YAML directory.
 # Example: change firmwareName below to show a different identity in the
 # virtual printer's M115 response; restart the launcher to apply the change.
@@ -8,7 +11,8 @@ schema_version: 1
 
 # Local OctoPrint source; blank uses the framework's pinned packaged release.
 source: plat/OctoPrint-dev
-# Blank lets the launcher prepare/select the matching Python environment.
+# Blank lets the launcher prepare/select Python for the chosen source.
+# Set an explicit path only when using a compatible OctoPrint interpreter.
 python: ''
 
 # Native OctoPrint option names. Unknown fields/types are rejected at startup.
