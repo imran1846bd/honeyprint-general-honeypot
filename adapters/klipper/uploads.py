@@ -7,7 +7,7 @@ import uuid
 MAX_UPLOAD=1179648
 
 
-def prepare_upload(body,content_type,artifacts):
+def prepare_upload(body,content_type,artifacts,*,max_file_bytes=1048576):
     if artifacts is None: raise ValueError('Artifact retention is unavailable')
     if not isinstance(body,bytes) or not 1<=len(body)<=MAX_UPLOAD:
         raise ValueError('Upload exceeds the limit')
@@ -29,7 +29,7 @@ def prepare_upload(body,content_type,artifacts):
             filename=part.get_filename()
             if not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.gcode',filename,re.I):
                 raise ValueError('Only simple G-code filenames are supported')
-            if not 1<=len(data)<=1048576 or b'\0' in data: raise ValueError('Invalid G-code artifact')
+            if not 1<=len(data)<=max_file_bytes or b'\0' in data: raise ValueError('Invalid G-code artifact')
             data.decode('utf-8')
             content=data
         elif name not in ('root','path','print') or len(data)>128:
