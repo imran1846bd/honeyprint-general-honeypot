@@ -6,9 +6,16 @@ import signal
 import subprocess
 import threading
 import time
+try:
+    from deployment.docker.klipper.settings import resolve_klipper_settings
+except ModuleNotFoundError:  # The Docker image copies this module to /settings.py.
+    from settings import resolve_klipper_settings
 
 
-def printer_config(profile):
+def printer_config(profile, settings=None):
+    native = resolve_klipper_settings(settings)
+    motion = native['motion']
+    extruder = native['extruder']
     volume = profile['volume']
     for key in ('width','depth','height'):
         if type(volume[key]) not in (int,float) or not 0 < volume[key] <= 10000:
@@ -16,15 +23,16 @@ def printer_config(profile):
     if type(profile['heated_bed']) is not bool or type(profile['nozzle_diameter']) not in (int,float) or not 0 < profile['nozzle_diameter'] <= 10:
         raise ValueError('Invalid printer profile')
     sections=[]
-    for axis,step,direction,endstop,rotation,dimension in (
-        ('x','PA5','PA4','PB0',40,'width'),('y','PA3','PA2','PB1',40,'depth'),
-        ('z','PC7','PC6','PB2',8,'height')):
+    for axis,step,direction,endstop,dimension in (
+        ('x','PA5','PA4','PB0','width'),('y','PA3','PA2','PB1','depth'),
+        ('z','PC7','PC6','PB2','height')):
+        stepper = native['steppers'][axis]
         sections.append(f'''[stepper_{axis}]
 step_pin: {step}
 dir_pin: {direction}
 enable_pin: PA1
-microsteps: 16
-rotation_distance: {rotation}
+microsteps: {stepper['microsteps']}
+rotation_distance: {stepper['rotation_distance']}
 endstop_pin: ^{endstop}
 position_endstop: 0
 position_min: 0
@@ -34,10 +42,10 @@ position_max: {volume[dimension]}
 step_pin: PC3
 dir_pin: PC2
 enable_pin: PA1
-microsteps: 16
-rotation_distance: 33.5
+microsteps: {extruder['microsteps']}
+rotation_distance: {extruder['rotation_distance']}
 nozzle_diameter: {profile['nozzle_diameter']}
-filament_diameter: 1.75
+filament_diameter: {extruder['filament_diameter']}
 heater_pin: PB4
 sensor_type: EPCOS 100K B57560G104F
 sensor_pin: PA7
@@ -46,26 +54,26 @@ pid_Kp: 22.2
 pid_Ki: 1.08
 pid_Kd: 114
 min_temp: 0
-min_extrude_temp: 170
-max_temp: 280
+min_extrude_temp: {extruder['min_extrude_temp']}
+max_temp: {extruder['max_temp']}
 ''')
     if profile['heated_bed']:
-        sections.append('''[heater_bed]
+        sections.append(f'''[heater_bed]
 heater_pin: PB3
 sensor_type: EPCOS 100K B57560G104F
 sensor_pin: PA0
 control: watermark
 min_temp: 0
-max_temp: 130
+max_temp: {native['heated_bed']['max_temp']}
 ''')
-    sections.append('''[mcu]
+    sections.append(f'''[mcu]
 serial: /tmp/pseudoserial
 [printer]
 kinematics: cartesian
-max_velocity: 200
-max_accel: 1000
-max_z_velocity: 20
-max_z_accel: 30
+max_velocity: {motion['max_velocity']}
+max_accel: {motion['max_accel']}
+max_z_velocity: {motion['max_z_velocity']}
+max_z_accel: {motion['max_z_accel']}
 [virtual_sdcard]
 path: /data/gcodes
 [display_status]
@@ -83,7 +91,8 @@ def main():
     root=Path('/data');root.mkdir(exist_ok=True)
     for name in ('logs','config','gcodes'): (root/name).mkdir(exist_ok=True)
     profile=json.loads(os.environ['HONEYPRINT_PROFILE_JSON'])
-    (root/'config/printer.cfg').write_text(printer_config(profile))
+    settings=json.loads(os.environ.get('HONEYPRINT_KLIPPER_SETTINGS_JSON', '{}'))
+    (root/'config/printer.cfg').write_text(printer_config(profile, settings))
     (root/'config/moonraker.conf').write_text('''[server]
 host: 0.0.0.0
 port: 7125
