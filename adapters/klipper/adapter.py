@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 from telemetry.artifact_storage import ArtifactStorage
+from core.storage_paths import artifact_root
 from deployment.mainsail import installed
 from adapters.klipper.http_bridge import create_bridge
 from adapters.base_adapter import AdapterError, PlatformAdapter
@@ -26,7 +27,9 @@ def revision_matches(version, revision):
 class KlipperAdapter(PlatformAdapter):
     platform_id = 'klipper'
 
-    def __init__(self, *, runtime_dir=None):
+    def __init__(self, *, runtime_dir=None, artifact_settings=None):
+        from core.runtime_settings import resolve_settings
+        self.settings = resolve_settings(artifact_settings)
         self.runtime_dir = Path(runtime_dir or ".honeyprint")
         self.artifacts = None
         self.frontend = None
@@ -55,7 +58,10 @@ class KlipperAdapter(PlatformAdapter):
             raise AdapterError('Klipper adapter is already prepared')
         self.profile = load_profile(plan['config']['printer_profile'])
         self.frontend = installed() if plan["config"].get("frontend") == "mainsail" else None
-        self.artifacts = ArtifactStorage(self.runtime_dir / "artifacts" / plan["config"]["id"])
+        self.artifacts = ArtifactStorage(artifact_root(self.runtime_dir,self.settings) / plan["config"]["id"],
+            max_bytes=self.settings["artifact_max_total_bytes"],
+            max_artifacts=self.settings["artifact_max_files"],
+            max_file_bytes=self.settings["artifact_max_file_bytes"])
         self.environment = KlipperEnvironment.prepare()
         self.stopped.clear()
         self.observer_error = False
@@ -65,7 +71,7 @@ class KlipperAdapter(PlatformAdapter):
             raise AdapterError('Klipper adapter has not been prepared')
         self.environment.start(self.profile)
         try:
-            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: self.sink(event) if self.sink else None, artifacts=self.artifacts, frontend=self.frontend)
+            self.server = create_bridge(self.environment, plan["config"]["services"]["web_port"], lambda event: self.sink(event) if self.sink else None, artifacts=self.artifacts, frontend=self.frontend, common_settings=self.settings, printer_profile=self.profile)
         except Exception:
             self.environment.stop()
             raise AdapterError("Klipper API bridge could not bind") from None
