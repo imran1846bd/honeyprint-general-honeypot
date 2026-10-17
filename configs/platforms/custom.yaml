@@ -1,8 +1,0 @@
-# Only loaded when this platform is selected (or platform=all).
-# Paths are relative to the project root containing configs/platforms/.
-# Empty python/source uses the framework default; custom code/api_url empty selects the built-in lab.
-schema_version: 1
-code: ''
-api_url: ''
-python: ''
-health_path: /
