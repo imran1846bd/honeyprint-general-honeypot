@@ -8,12 +8,9 @@ import threading
 
 
 class ArtifactStorage:
-    def __init__(self, root, *, max_bytes=104857600, max_artifacts=1000, max_file_bytes=1048576):
+    def __init__(self, root, *, max_bytes=104857600, max_artifacts=1000):
         if type(max_bytes) is not int or not 1 <= max_bytes <= 1073741824 or type(max_artifacts) is not int or not 1 <= max_artifacts <= 10000:
             raise ValueError('Invalid artifact retention limits')
-        if type(max_file_bytes) is not int or not 1 <= max_file_bytes <= 1048576:
-            raise ValueError('Invalid per-file artifact limit')
-        self.max_file_bytes = max_file_bytes
         self.max_bytes, self.max_artifacts = max_bytes, max_artifacts
         self._lock = threading.RLock()
         self.root = Path(root).absolute()
@@ -26,8 +23,8 @@ class ArtifactStorage:
             return self._store(content)
 
     def _store(self, content):
-        if type(content) is not bytes or not 1 <= len(content) <= self.max_file_bytes:
-            raise ValueError('Artifact exceeds the configured per-file byte limit')
+        if type(content) is not bytes or not 1 <= len(content) <= 1048576:
+            raise ValueError('Artifact must contain at most one MiB of bytes')
         digest = hashlib.sha256(content).hexdigest()
         destination = self.root / (digest + '.gcode')
         if destination.exists() or destination.is_symlink():
@@ -58,7 +55,7 @@ class ArtifactStorage:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, 'rb') as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode): raise ValueError('Artifact must be a regular file')
-            content = stream.read(self.max_file_bytes + 1)
-        if len(content) > self.max_file_bytes or hashlib.sha256(content).hexdigest() != digest:
+            content = stream.read(1048577)
+        if len(content) > 1048576 or hashlib.sha256(content).hexdigest() != digest:
             raise ValueError('Artifact integrity check failed')
         return content
