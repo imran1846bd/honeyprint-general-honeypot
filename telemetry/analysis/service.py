@@ -34,23 +34,18 @@ def main(argv=None):
     parser.add_argument('--alerts', type=Path, required=True)
     parser.add_argument('--watch', action='store_true', help='Continuously inspect new committed events')
     parser.add_argument('--interval', type=float, default=0.5)
-    parser.add_argument('--batch-size', type=int, default=100)
-    parser.add_argument('--sqlite-timeout', type=float, default=5)
     args = parser.parse_args(argv)
-    from core.runtime_settings import resolve_settings
-    try: resolve_settings({'analysis_batch_size': args.batch_size, 'sqlite_busy_timeout_seconds': args.sqlite_timeout})
-    except ValueError as error: parser.error(str(error))
     if not math.isfinite(args.interval) or not 0.1 <= args.interval <= 60:
         parser.error('Interval must be between 0.1 and 60 seconds')
     try:
         if args.database.resolve() == args.alerts.resolve():
             raise ValueError('Raw evidence and derived alerts must use different files')
         args.alerts.parent.mkdir(parents=True, exist_ok=True)
-        with EvidenceReader(args.database, timeout=args.sqlite_timeout) as evidence, AlertStore(args.alerts, timeout=args.sqlite_timeout) as alerts:
+        with EvidenceReader(args.database) as evidence, AlertStore(args.alerts) as alerts:
             analyzer = Analyzer(evidence, alerts)
             total = 0
             while True:
-                result = analyzer.process_once(limit=args.batch_size)
+                result = analyzer.process_once()
                 total += result['processed']
                 if result['findings']:
                     print(f"Local alert: {result['findings']} new rule finding(s). Review context before classifying an attack.", flush=True)
