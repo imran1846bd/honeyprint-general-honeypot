@@ -1,0 +1,39 @@
+# Klipper-specific configuration. Loaded only for klipper (or all).
+# Set HONEYPRINT_PLATFORM=klipper in .env, then restart ./run.sh after edits.
+# Common port, printer name/build size/nozzle, preheat, logs and analysis stay in .env.
+# The isolated AVR/Moonraker image is rebuilt once when its config schema changes.
+schema_version: 1
+
+# Local Klipper source; blank uses the framework's pinned upstream revision.
+# Relative paths start at the project root, not this YAML directory.
+source: plat/klipper-master
+
+# These values generate native Klipper printer.cfg inside the owned container.
+# Unknown keys, nonnumeric values and out-of-range values stop startup.
+settings:
+  motion:
+    max_velocity: 200       # mm/s, 1..500
+    max_accel: 1000         # mm/s², 1..10000
+    max_z_velocity: 20      # mm/s, 1..100; <= max_velocity
+    max_z_accel: 30         # mm/s², 1..1000; <= max_accel
+
+  steppers:
+    x:
+      microsteps: 16        # power of two, 1..256
+      rotation_distance: 40 # mm/revolution, 0.1..100
+    y:
+      microsteps: 16
+      rotation_distance: 40
+    z:
+      microsteps: 16
+      rotation_distance: 8
+
+  extruder:
+    microsteps: 16
+    rotation_distance: 33.5 # mm/revolution, 0.1..100
+    filament_diameter: 1.75 # mm, 1..3
+    min_extrude_temp: 170   # °C, 0..280; below max_temp
+    max_temp: 280           # °C, 180..300
+
+  heated_bed:
+    max_temp: 130           # °C, 50..150; used when .env enables heated bed
