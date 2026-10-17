@@ -49,7 +49,24 @@ Start the selected honeypot:
 ./run.sh
 ```
 
-To enable the simulated SSH printer console, set `HONEYPRINT_SSH_ENABLED=true` in `.env`. The default listener is `127.0.0.1:2222`; `HONEYPRINT_SSH_HOST`, `HONEYPRINT_SSH_PORT`, `HONEYPRINT_SSH_USERNAME` and `HONEYPRINT_SSH_PASSWORD` are configurable. Restart `./run.sh`, then connect with `ssh -p 2222 admin@127.0.0.1` and enter the configured password. SSH uses a separate port from the web honeypot. It emulates fixed printer-console commands and never runs a host shell. Login outcomes and command names enter the shared `events.sqlite3`; passwords and command arguments are not recorded. The SSH host key stays private in the runtime directory. The default binds only to this computer; `0.0.0.0` explicitly exposes the decoy on local network interfaces.
+## Optional SSH printer console
+
+The repository `.env` keeps SSH disabled and reserves port `2223`. To start the simulated SSH console alongside the selected web honeypot, change these two values:
+
+```dotenv
+HONEYPRINT_SSH_ENABLED=true
+HONEYPRINT_SSH_PORT=2223
+```
+
+Restart `./run.sh`, then connect from another terminal:
+
+```bash
+ssh -p 2223 admin@127.0.0.1
+```
+
+The default SSH username and password are `admin` / `admin`; `HONEYPRINT_SSH_USERNAME` and `HONEYPRINT_SSH_PASSWORD` can override them in your local `.env`. `HONEYPRINT_SSH_ENABLED=false` does not start an SSH listener, but the HTTP honeypot still runs on `HONEYPRINT_PORT`. SSH has its own port; startup reports an error if that port is occupied. If the port setting is omitted entirely, the code default is `2222`.
+
+The console supports only fixed virtual-printer commands (`help`, `status`, `M105`, `M115`, `ls`, `pwd`, `whoami`, `exit`); it never starts a host shell. Accepted/rejected logins and command names are recorded in the shared `.honeyprint/quickstart/events.sqlite3` (or your configured runtime directory); passwords and command arguments are not recorded. The SSH host key is stored privately in that runtime directory. By default SSH binds to `127.0.0.1`; set `HONEYPRINT_SSH_HOST=0.0.0.0` only if you want the decoy reachable on local network interfaces.
 
 Open **http://127.0.0.1:8081**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
 
@@ -146,7 +163,7 @@ This adds the read-only analyst interface at http://127.0.0.1:8090. It is not re
 
 Optional `HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated printer profile values. Blank values preserve the profile defaults.
 
-`.env` is a literal settings file, never executed as a shell script. Unknown and duplicate keys are rejected. Process environment values override the file, and explicit CLI settings override generated defaults. Use `--env-file /path/to/settings.env` to select another env file. Env files remain local and are excluded from Git.
+`.env` is a literal settings file, never executed as a shell script. Unknown and duplicate keys are rejected. Process environment values override the file, and explicit CLI settings override generated defaults. Use `--env-file /path/to/settings.env` to select another env file. This repository tracks its example `.env`; keep real passwords and other private values out of commits.
 
 Existing YAML configurations remain available through `./run.sh --config /path/to/config.yaml`. Custom connection settings can be passed with `--custom-code` or `--custom-api-url`; use `--no-analyst` to omit the dashboard for an explicit YAML launch. YAML defines the instances and capabilities; the ordinary one-platform flow uses `.env` to generate this configuration automatically.
 
