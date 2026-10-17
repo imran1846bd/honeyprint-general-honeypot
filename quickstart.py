@@ -4,6 +4,8 @@ import errno
 from contextlib import closing
 import http.client
 import json
+import math
+from core.runtime_settings import resolve_settings
 import os
 from pathlib import Path
 import signal
@@ -18,16 +20,16 @@ import time
 ROOT = Path(__file__).resolve().parent
 
 
-def last_sequence(database):
+def last_sequence(database, timeout=5):
     if not database.exists(): return 0
-    with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=1)) as connection:
+    with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=timeout)) as connection:
         return connection.execute('SELECT COALESCE(MAX(sequence),0) FROM events').fetchone()[0]
 
 
-def runtime_ready(database, baseline, expected):
+def runtime_ready(database, baseline, expected, timeout=5):
     if not database.exists(): return False
     try:
-        with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=0.2)) as connection:
+        with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=timeout)) as connection:
             rows=connection.execute('SELECT payload FROM events WHERE sequence>?', (baseline,)).fetchall()
         observed=set()
         for row in rows:
@@ -38,7 +40,7 @@ def runtime_ready(database, baseline, expected):
     except (sqlite3.Error, ValueError, KeyError): return False
 
 
-def stop_children(children):
+def stop_children(children, timeout=60):
     for process in reversed(children):
         if process.poll() is None:
             try:
@@ -48,7 +50,7 @@ def stop_children(children):
                     os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError: pass
     for process in reversed(children):
-        try: process.wait(timeout=60)
+        try: process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             try: os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError: pass
@@ -74,6 +76,7 @@ def main(argv=None):
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
     args=parser.parse_args(argv)
     generated=None
+    settings=resolve_settings()
     try:
         if args.config is None:
             from deployment.env_config import read_env, build_config
@@ -91,7 +94,7 @@ def main(argv=None):
     except (OSError,ValueError,RuntimeError) as error:
         if generated:generated.cleanup()
         parser.error(str(error))
-    if args.duration is not None and not 0 < args.duration <= 86400: parser.error('Invalid duration')
+    if args.duration is not None and (not math.isfinite(args.duration) or not 0 < args.duration <= 86400): parser.error('Invalid duration')
     children=[];stopping=threading.Event()
     shutdown_signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     previous={sig:signal.getsignal(sig) for sig in shutdown_signals}
@@ -99,10 +102,12 @@ def main(argv=None):
     try:
         from core.config_loader import load_config
         config=load_config(args.config)
+        settings=resolve_settings(config.get('runtime', {}))
+        if args.duration is None: args.duration=settings['run_duration_seconds'] or None
         from core.builtin_registry import create_builtin_registry
         from core.validator import validate_config
         validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
-                           custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url))
+                           custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url, runtime_settings=settings))
         # Diagnose a second launch before dependency preparation or child startup.
         import fcntl
         runtime_lock = args.runtime_dir / 'control.lock'
@@ -129,12 +134,13 @@ def main(argv=None):
         if not expected:raise ValueError('No configured instances')
         if args.analyst_enabled and any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
             raise ValueError('Dashboard port conflicts with a platform port')
-        runtime=args.runtime_dir.absolute();database=runtime/'events.sqlite3';alerts=runtime/'analysis.sqlite3'
+        runtime=args.runtime_dir.absolute();database=runtime/settings['evidence_db_name'];alerts=runtime/settings['analysis_db_name']
+        if database.resolve() == alerts.resolve(): raise ValueError('Evidence and analysis paths must differ')
         if args.analyst_enabled:
             with socket.socket() as probe:
                 probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
                 probe.bind(('127.0.0.1',args.dashboard_port))
-        baseline=last_sequence(database)
+        baseline=last_sequence(database, timeout=settings['sqlite_busy_timeout_seconds'])
         command=[sys.executable,str(ROOT/'main.py'),'run',str(args.config.absolute()),'--runtime-dir',str(runtime)]
         if args.octoprint_python:command+=['--octoprint-python',str(args.octoprint_python.absolute())]
         if args.attach_api_key_env:command+=['--attach-api-key-env',args.attach_api_key_env]
@@ -143,24 +149,34 @@ def main(argv=None):
         if args.custom_python:command+=['--custom-python',str(args.custom_python.absolute())]
         command+=['--custom-health-path',args.custom_health_path]
         children.append(subprocess.Popen(command,cwd=ROOT,start_new_session=True))
-        deadline=time.monotonic()+180
-        while not runtime_ready(database,baseline,expected):
+        deadline=time.monotonic()+settings['startup_timeout_seconds']
+        while not runtime_ready(database,baseline,expected,timeout=settings['sqlite_busy_timeout_seconds']):
             if stopping.wait(0.1):return 0
             if children[0].poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('Framework startup failed')
-        children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.service','--database',str(database),
-                                          '--alerts',str(alerts),'--watch'],cwd=ROOT,start_new_session=True))
+        if settings['analysis_enabled']:
+            # Create the alert schema before the dashboard opens it; avoid a startup race.
+            from telemetry.analysis.alerts import AlertStore
+            with AlertStore(alerts, timeout=settings['sqlite_busy_timeout_seconds']): pass
+            children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.service','--database',str(database),
+                '--alerts',str(alerts),'--watch','--interval',str(settings['analysis_interval_seconds']),
+                '--batch-size',str(settings['analysis_batch_size']),
+                '--sqlite-timeout',str(settings['sqlite_busy_timeout_seconds'])],cwd=ROOT,start_new_session=True))
         if args.analyst_enabled:
-            children.append(subprocess.Popen([sys.executable,'-m','dashboard.server','--database',str(database),
-                                              '--alerts',str(alerts),'--port',str(args.dashboard_port)],cwd=ROOT,start_new_session=True))
-            deadline=time.monotonic()+10
+            dashboard_command=[sys.executable,'-m','dashboard.server','--database',str(database),
+                '--port',str(args.dashboard_port),'--page-size',str(settings['dashboard_page_size']),
+                '--request-timeout',str(settings['dashboard_request_timeout_seconds']),
+                '--sqlite-timeout',str(settings['sqlite_busy_timeout_seconds'])]
+            if settings['analysis_enabled']: dashboard_command += ['--alerts',str(alerts)]
+            children.append(subprocess.Popen(dashboard_command,cwd=ROOT,start_new_session=True))
+            deadline=time.monotonic()+settings['dashboard_startup_timeout_seconds']
             while True:
                 if stopping.wait(0.1):return 0
                 if any(p.poll() is not None for p in children):raise RuntimeError('A local service stopped unexpectedly')
-                connection=http.client.HTTPConnection('127.0.0.1',args.dashboard_port,timeout=1)
+                connection=http.client.HTTPConnection('127.0.0.1',args.dashboard_port,timeout=settings['dashboard_request_timeout_seconds'])
                 try:
-                    connection.request('GET','/api/events');response=connection.getresponse()
-                    if response.status==200 and isinstance(json.loads(response.read(1048576)),list):break
+                    connection.request('GET','/health');response=connection.getresponse()
+                    if response.status==200 and json.loads(response.read(4096)) == {'ready': True}:break
                 except (OSError,ValueError,http.client.HTTPException):pass
                 finally:connection.close()
                 if time.monotonic()>deadline:raise RuntimeError('Dashboard startup failed')
@@ -173,14 +189,14 @@ def main(argv=None):
             if any(p.poll() is not None for p in children):raise RuntimeError('A local service stopped unexpectedly')
             if args.duration is not None and time.monotonic()-started>=args.duration:break
         return 0
-    except (OSError,ValueError,RuntimeError,sqlite3.Error,KeyError,ModuleNotFoundError) as error:
+    except (OSError,ValueError,RuntimeError,sqlite3.Error,KeyError,ModuleNotFoundError,subprocess.SubprocessError) as error:
         if isinstance(error, OSError) and error.errno == errno.EADDRINUSE:
             print(f'Local startup failed: dashboard port {args.dashboard_port} is already in use. Stop the existing run with main.py stop --runtime-dir followed by your selected runtime directory, or change HONEYPRINT_DASHBOARD_PORT in .env.',file=sys.stderr)
         else:
             print(f'Local startup failed: {error}',file=sys.stderr)
         return 1
     finally:
-        stop_children(children)
+        stop_children(children, timeout=settings['shutdown_timeout_seconds'])
         if generated:generated.cleanup()
         for sig,handler in previous.items():signal.signal(sig,handler)
         if children and children[0].returncode != 0:
