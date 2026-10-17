@@ -20,8 +20,8 @@ def parse_api_url(value):
 class CustomAPIAdapter(CustomProcessAdapter):
     owned_platform_resources = False
 
-    def __init__(self, *, api_url, health_path='/', runtime_dir=None):
-        super().__init__(entry=Path(__file__), health_path=health_path, runtime_dir=runtime_dir)
+    def __init__(self, *, api_url, health_path='/', runtime_dir=None, common_settings=None):
+        super().__init__(entry=Path(__file__), health_path=health_path, runtime_dir=runtime_dir, common_settings=common_settings)
         self.url = parse_api_url(api_url)
 
     def capabilities(self):
