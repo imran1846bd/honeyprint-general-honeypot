@@ -20,10 +20,10 @@ class SQLiteStorage:
     dictionaries. No uploaded artifacts or arbitrary SQL are executed.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, timeout=5) -> None:
         self._lock = RLock()
         self._closed = False
-        self._connection = sqlite3.connect(str(path), timeout=5, check_same_thread=False)
+        self._connection = sqlite3.connect(str(path), timeout=timeout, check_same_thread=False)
         try:
             self._connection.execute('PRAGMA synchronous=FULL')
             self._connection.execute('''CREATE TABLE IF NOT EXISTS events (
