@@ -74,6 +74,8 @@ Set `HONEYPRINT_TELNET_ENABLED=true` in `.env` and restart `./run.sh`. `HONEYPRI
 
 Telnet accepts at most three login attempts per connection and responds to the same fixed virtual-printer commands as SSH. It never executes host commands. Authentication outcomes, sessions and command names are recorded in the shared evidence database; passwords and command arguments are omitted. Telnet transmits credentials without encryption, so it binds only to this computer by default. Set `HONEYPRINT_TELNET_HOST=0.0.0.0` only when you intentionally want network access. Set `HONEYPRINT_TELNET_ENABLED=false` to stop the Telnet listener while leaving the web honeypot running.
 
+For a manual test without editing `.env`, run `HONEYPRINT_TELNET_ENABLED=true ./run.sh` in the project directory. After it reports readiness, run `telnet 127.0.0.1 2323` in a second terminal. Enter the configured username and password (both `admin` by default), then try `help`, `status`, `M105`, `M115` and `exit`. Stop the launcher with Ctrl-C when finished.
+
 Open **http://127.0.0.1:8081**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
 
 ## Switch the platform
