@@ -15,6 +15,8 @@ KEYS |= {'HONEYPRINT_SSH_ENABLED', 'HONEYPRINT_SSH_HOST', 'HONEYPRINT_SSH_PORT',
          'HONEYPRINT_SSH_USERNAME', 'HONEYPRINT_SSH_PASSWORD'}
 KEYS |= {'HONEYPRINT_TELNET_ENABLED', 'HONEYPRINT_TELNET_HOST', 'HONEYPRINT_TELNET_PORT',
          'HONEYPRINT_TELNET_USERNAME', 'HONEYPRINT_TELNET_PASSWORD'}
+KEYS |= {'HONEYPRINT_MQTT_ENABLED', 'HONEYPRINT_MQTT_HOST', 'HONEYPRINT_MQTT_PORT',
+         'HONEYPRINT_MQTT_USERNAME', 'HONEYPRINT_MQTT_PASSWORD'}
 
 
 def read_env(path):
@@ -147,6 +149,18 @@ def build_config(values,base,output):
     telnet_password = values.get('HONEYPRINT_TELNET_PASSWORD', 'admin')
     if not 1 <= len(telnet_password) <= 128 or any(ord(c) < 32 for c in telnet_password):
         raise ValueError('HONEYPRINT_TELNET_PASSWORD must be 1..128 printable characters')
+    mqtt_enabled = values.get('HONEYPRINT_MQTT_ENABLED', 'false').lower()
+    if mqtt_enabled not in ('true', 'false'):
+        raise ValueError('HONEYPRINT_MQTT_ENABLED must be true or false')
+    mqtt_host = values.get('HONEYPRINT_MQTT_HOST', '127.0.0.1')
+    if mqtt_host not in ('127.0.0.1', '0.0.0.0'):
+        raise ValueError('HONEYPRINT_MQTT_HOST must be 127.0.0.1 or 0.0.0.0')
+    mqtt_username = values.get('HONEYPRINT_MQTT_USERNAME', 'admin')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,32}', mqtt_username):
+        raise ValueError('HONEYPRINT_MQTT_USERNAME must be 1..32 simple characters')
+    mqtt_password = values.get('HONEYPRINT_MQTT_PASSWORD', 'admin')
+    if not 1 <= len(mqtt_password) <= 128 or any(ord(c) < 32 for c in mqtt_password):
+        raise ValueError('HONEYPRINT_MQTT_PASSWORD must be 1..128 printable characters')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
         if instance['platform'] == 'octoprint':
@@ -180,4 +194,7 @@ def build_config(values,base,output):
             'ssh_username':ssh_username, 'ssh_password':ssh_password,
             'telnet_enabled':telnet_enabled == 'true', 'telnet_host':telnet_host,
             'telnet_port':port(values.get('HONEYPRINT_TELNET_PORT'),2323),
-            'telnet_username':telnet_username, 'telnet_password':telnet_password}
+            'telnet_username':telnet_username, 'telnet_password':telnet_password,
+            'mqtt_enabled':mqtt_enabled == 'true', 'mqtt_host':mqtt_host,
+            'mqtt_port':port(values.get('HONEYPRINT_MQTT_PORT'),1883),
+            'mqtt_username':mqtt_username, 'mqtt_password':mqtt_password}

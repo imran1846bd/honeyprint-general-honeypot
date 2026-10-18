@@ -73,7 +73,7 @@ def main(argv=None):
     parser.add_argument('--no-bootstrap',action='store_true',help='Use already installed platform dependencies')
     parser.add_argument('--duration',type=float,help='Stop all services after this many ready seconds')
     args=parser.parse_args(argv)
-    generated=None;selected=None;ssh_ready_directory=None;telnet_ready_directory=None
+    generated=None;selected=None;ssh_ready_directory=None;telnet_ready_directory=None;mqtt_ready_directory=None
     try:
         if args.config is None:
             from deployment.env_config import read_env, build_config
@@ -90,6 +90,9 @@ def main(argv=None):
         telnet_enabled=selected['telnet_enabled'] if selected else False
         telnet_host=selected['telnet_host'] if selected else '127.0.0.1'
         telnet_port=selected['telnet_port'] if selected else 2323
+        mqtt_enabled=selected['mqtt_enabled'] if selected else False
+        mqtt_host=selected['mqtt_host'] if selected else '127.0.0.1'
+        mqtt_port=selected['mqtt_port'] if selected else 1883
         args.runtime_dir=args.runtime_dir or ROOT/'.honeyprint/quickstart'
         args.dashboard_port=args.dashboard_port or 8090
         args.custom_health_path=args.custom_health_path or '/'
@@ -159,6 +162,18 @@ def main(argv=None):
                 try:probe.bind((telnet_host,telnet_port))
                 except OSError:
                     raise RuntimeError(f'Telnet port {telnet_port} is already in use. Change HONEYPRINT_TELNET_PORT in .env') from None
+        if mqtt_enabled:
+            if len(config['instances']) != 1:
+                raise ValueError('MQTT decoy requires one selected platform instance')
+            used = {port for instance in config['instances'] for port in instance['services'].values()}
+            if ((args.analyst_enabled and mqtt_port == args.dashboard_port)
+                    or mqtt_port in used or (ssh_enabled and mqtt_port == ssh_port)
+                    or (telnet_enabled and mqtt_port == telnet_port)):
+                raise ValueError('MQTT port conflicts with another service port')
+            with socket.socket() as probe:
+                try:probe.bind((mqtt_host,mqtt_port))
+                except OSError:
+                    raise RuntimeError(f'MQTT port {mqtt_port} is already in use. Change HONEYPRINT_MQTT_PORT in .env') from None
         runtime=args.runtime_dir.absolute();database=runtime/'events.sqlite3';alerts=runtime/'analysis.sqlite3'
         if args.analyst_enabled:
             with socket.socket() as probe:
@@ -212,6 +227,23 @@ def main(argv=None):
                 if stopping.wait(0.1):return 0
                 if any(p.poll() is not None for p in children) or time.monotonic()>deadline:
                     raise RuntimeError('Telnet service startup failed')
+        if mqtt_enabled:
+            instance=config['instances'][0]
+            mqtt_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-mqtt-')
+            mqtt_ready=Path(mqtt_ready_directory.name)/'ready'
+            mqtt_env=os.environ.copy()
+            mqtt_env['HONEYPRINT_MQTT_USERNAME']=selected['mqtt_username']
+            mqtt_env['HONEYPRINT_MQTT_PASSWORD']=selected['mqtt_password']
+            mqtt_command=[sys.executable,'-m','services.mqtt_decoy',
+                '--host',mqtt_host,'--port',str(mqtt_port),'--database',str(database),
+                '--instance-id',instance['id'],'--platform',instance['platform'],
+                '--ready-file',str(mqtt_ready)]
+            children.append(subprocess.Popen(mqtt_command,cwd=ROOT,env=mqtt_env,start_new_session=True))
+            deadline=time.monotonic()+10
+            while not mqtt_ready.exists():
+                if stopping.wait(0.1):return 0
+                if any(p.poll() is not None for p in children) or time.monotonic()>deadline:
+                    raise RuntimeError('MQTT service startup failed')
         children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.service','--database',str(database),
                                           '--alerts',str(alerts),'--watch'],cwd=ROOT,start_new_session=True))
         if args.analyst_enabled:
@@ -232,6 +264,7 @@ def main(argv=None):
         print(f'Local services ready. Honeypot: {links}. Logs: {database}. Ctrl-C stops all services.',flush=True)
         if ssh_enabled:print(f'SSH decoy: ssh -p {ssh_port} {selected["ssh_username"]}@127.0.0.1',flush=True)
         if telnet_enabled:print(f'Telnet decoy: telnet 127.0.0.1 {telnet_port}',flush=True)
+        if mqtt_enabled:print(f'MQTT decoy: 127.0.0.1:{mqtt_port}, topic honeyprint/{instance["id"]}/#',flush=True)
         if args.analyst_enabled:print(f'Optional analyst dashboard: http://127.0.0.1:{args.dashboard_port}',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
@@ -249,6 +282,7 @@ def main(argv=None):
         stop_children(children)
         if ssh_ready_directory:ssh_ready_directory.cleanup()
         if telnet_ready_directory:telnet_ready_directory.cleanup()
+        if mqtt_ready_directory:mqtt_ready_directory.cleanup()
         if generated:generated.cleanup()
         for sig,handler in previous.items():signal.signal(sig,handler)
         if children and children[0].returncode != 0:
