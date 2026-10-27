@@ -237,6 +237,10 @@ def main(argv=None):
                     raise RuntimeError('Telnet service startup failed')
         if mqtt_enabled:
             instance=config['instances'][0]
+            control_args=(['--control-port',str(instance['services']['web_port']),
+                           '--runtime-dir',str(runtime)]
+                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','klipper','custom_lab')
+                          and instance['simulation'] in ('virtual_printer','avr_sim','lab_sim') else [])
             mqtt_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-mqtt-')
             mqtt_ready=Path(mqtt_ready_directory.name)/'ready'
             mqtt_env=os.environ.copy()
@@ -245,7 +249,7 @@ def main(argv=None):
             mqtt_command=[sys.executable,'-m','services.mqtt_decoy',
                 '--host',mqtt_host,'--port',str(mqtt_port),'--database',str(database),
                 '--instance-id',instance['id'],'--platform',instance['platform'],
-                '--ready-file',str(mqtt_ready)]
+                '--ready-file',str(mqtt_ready),*control_args]
             children.append(subprocess.Popen(mqtt_command,cwd=ROOT,env=mqtt_env,start_new_session=True))
             deadline=time.monotonic()+10
             while not mqtt_ready.exists():

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from telemetry.normalizer import normalize_event
 from telemetry.sqlite_storage import SQLiteStorage
+from services.printer_control import PrinterControl, ControlError, FILENAME
 
 MAX_PACKET = 65536
 
@@ -80,7 +81,7 @@ def matches(pattern, topic):
     return len(parts) == len(target)
 
 
-def serve(host, port, username, password, database, instance_id, platform, ready_file=None):
+def serve(host, port, username, password, database, instance_id, platform, ready_file=None, control=None):
     stop = threading.Event()
     clients = set()
     subscriptions_by_client = {}
@@ -97,6 +98,17 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                 'metadata': metadata}, instance_id=instance_id, platform=platform)])
 
         def snapshot():
+            if control is not None:
+                try:
+                    current = control.snapshot()
+                    return {
+                        prefix + '/state': json.dumps({'printer': current['state'], 'platform': platform,
+                                                       'job': current.get('job'), 'progress': current.get('progress')}, separators=(',', ':')).encode(),
+                        prefix + '/temperature': json.dumps({'tool': current['tool'], 'bed': current['bed']}, separators=(',', ':')).encode(),
+                    }
+                except ControlError:
+                    return {prefix + '/state': b'{"printer":"unavailable"}',
+                            prefix + '/temperature': b'{"tool":null,"bed":null}'}
             with lock:
                 status = state['status']
             return {
@@ -115,6 +127,15 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                             publish(subscriber, topic, payload)
                         except OSError:
                             pass
+
+        def watch_platform():
+            previous = None
+            while not stop.wait(1):
+                current = snapshot()
+                if current != previous:
+                    for topic, payload in current.items():
+                        broadcast(topic, payload)
+                    previous = current
 
         def handle(client, peer):
             session = str(uuid4())
@@ -197,21 +218,52 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                             raise ValueError('invalid topic')
                         emit('mqtt.publish', 'publish', 'observed', session,
                              {'topic': topic, 'payload_bytes': len(payload), 'qos': qos})
-                        if topic == prefix + '/command':
-                            verb = payload.decode('utf-8', 'replace').strip().split(' ', 1)[0].lower()[:32]
-                            if verb not in ('status', 'm105', 'm115', 'start', 'pause', 'resume', 'cancel'):
+                        if topic.startswith(prefix + '/upload/'):
+                            name = topic[len(prefix + '/upload/'):]
+                            try:
+                                if control is None or not FILENAME.fullmatch(name):
+                                    raise ControlError('Use honeyprint/INSTANCE/upload/NAME.gcode')
+                                reply = control.upload(name, payload)
+                                outcome = 'accepted'
+                            except ControlError as error:
+                                reply = str(error)
+                                outcome = 'rejected'
+                            emit('mqtt.upload', 'upload', outcome, session,
+                                 {'filename': name[:128], 'bytes': len(payload)})
+                            response = json.dumps({'upload': name, 'result': reply,
+                                                   'outcome': outcome}, separators=(',', ':')).encode()
+                            broadcast(prefix + '/response', response)
+                        elif topic == prefix + '/command':
+                            command = payload.decode('utf-8', 'replace').strip()
+                            verb = command.split(' ', 1)[0].lower()[:32]
+                            if verb not in ('help', 'commands', 'gcodes', 'gcode', 'codes', 'files', 'show', 'select', 'print', 'job', 'status', 'temperature', 'position', 'home', 'move', 'heat', 'bed', 'cooldown', 'run', 'm105', 'm114', 'm115', 'g0', 'g1', 'g28', 'g90', 'g91', 'm82', 'm83', 'm104', 'm140', 'connect', 'start', 'pause', 'resume', 'cancel'):
                                 verb = '[other]'
-                            with lock:
-                                current = state['status']
-                                transitions = {'start': ('idle', 'printing'), 'pause': ('printing', 'paused'),
-                                               'resume': ('paused', 'printing'), 'cancel': ('printing', 'idle')}
-                                if verb == 'cancel' and current == 'paused':
-                                    state['status'] = 'idle'
-                                elif verb in transitions and current == transitions[verb][0]:
-                                    state['status'] = transitions[verb][1]
-                                current = state['status']
-                            emit('mqtt.command', verb, 'simulated', session, {'topic': topic})
-                            response = json.dumps({'command': verb, 'printer': current, 'simulated': True}, separators=(',', ':')).encode()
+                            if control is not None:
+                                try:
+                                    if verb == '[other]':
+                                        raise ControlError('Unsupported printer command')
+                                    reply, current_state = control.execute(command)
+                                    current = current_state['state']
+                                    outcome = 'accepted'
+                                except ControlError as error:
+                                    reply = str(error)
+                                    current = 'unavailable'
+                                    outcome = 'rejected'
+                            else:
+                                with lock:
+                                    current = state['status']
+                                    transitions = {'start': ('idle', 'printing'), 'pause': ('printing', 'paused'),
+                                                   'resume': ('paused', 'printing'), 'cancel': ('printing', 'idle')}
+                                    if verb == 'cancel' and current == 'paused':
+                                        state['status'] = 'idle'
+                                    elif verb in transitions and current == transitions[verb][0]:
+                                        state['status'] = transitions[verb][1]
+                                    current = state['status']
+                                reply = 'simulated'
+                                outcome = 'simulated'
+                            emit('mqtt.command', verb, outcome, session, {'topic': topic})
+                            response = json.dumps({'command': verb, 'printer': current, 'simulated': True,
+                                                   'result': reply}, separators=(',', ':')).encode()
                             broadcast(prefix + '/response', response)
                             broadcast(prefix + '/state', snapshot()[prefix + '/state'])
                         if qos:
@@ -246,6 +298,9 @@ def serve(host, port, username, password, database, instance_id, platform, ready
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(sig, shutdown)
         try:
+            watcher = threading.Thread(target=watch_platform, daemon=True) if control is not None else None
+            if watcher is not None:
+                watcher.start()
             if ready_file:
                 Path(ready_file).write_text('ready')
             while not stop.is_set():
@@ -268,6 +323,8 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                 worker.start()
         finally:
             shutdown()
+            if watcher is not None:
+                watcher.join(timeout=2)
             with lock:
                 pending = tuple(workers)
             for worker in pending:
@@ -284,13 +341,16 @@ def main(argv=None):
     parser.add_argument('--instance-id', required=True)
     parser.add_argument('--platform', required=True)
     parser.add_argument('--ready-file', type=Path)
+    parser.add_argument('--control-port', type=int)
+    parser.add_argument('--runtime-dir', type=Path)
     args = parser.parse_args(argv)
     username = os.environ.pop('HONEYPRINT_MQTT_USERNAME', None)
     password = os.environ.pop('HONEYPRINT_MQTT_PASSWORD', None)
     if not username or not password:
         parser.error('MQTT credentials are missing')
+    control = PrinterControl(args.platform, args.control_port, args.runtime_dir, args.instance_id) if args.control_port else None
     serve(args.host, args.port, username, password, args.database,
-          args.instance_id, args.platform, args.ready_file)
+          args.instance_id, args.platform, args.ready_file, control)
 
 
 if __name__ == '__main__':
