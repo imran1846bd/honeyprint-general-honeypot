@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from telemetry.normalizer import normalize_event
 from telemetry.sqlite_storage import SQLiteStorage
+from services.printer_control import PrinterControl, ControlError, FILENAME, MAX_UPLOAD
 
 
 IAC = 255
@@ -25,13 +26,22 @@ def command_metadata(command):
     return {'command': name, 'length': len(command)}
 
 
-def response(command):
-    """Return only fixed virtual-printer replies."""
+def response(command, control=None):
+    """Return a bounded virtual-printer reply without host commands."""
     verb = command.strip().split(' ', 1)[0].lower()
     if verb in ('exit', 'logout'):
         return b'logout\r\n', True
     if verb in ('', 'help', '?'):
-        return b'Commands: help, status, M105, M115, ls, pwd, whoami, exit\r\n', False
+        if control is not None and verb:
+            reply, _ = control.execute('help')
+            return (reply + '\r\n').encode(), False
+        return b'Commands: help, status, M105, M114, M115, G28, G0, G1, G90, G91, M82, M83, M104, M140, connect, start, pause, resume, cancel, ls, pwd, whoami, exit\r\n', False
+    if control is not None and verb not in ('ls', 'pwd', 'whoami'):
+        try:
+            reply, _ = control.execute(command)
+            return (str(reply) + '\r\n').encode(), False
+        except ControlError as error:
+            return (str(error) + '\r\n').encode(), False
     if verb in ('status', 'm105'):
         return b'Printer: idle\r\nT:25.0 /0.0 B:25.0 /0.0\r\n', False
     if verb == 'm115':
@@ -99,7 +109,7 @@ def read_line(client, limit, echo, line_state):
                 overflow = True
 
 
-def serve(host, port, username, password, database, instance_id, platform, ready_file=None):
+def serve(host, port, username, password, database, instance_id, platform, ready_file=None, control=None):
     stop = threading.Event()
     active = set()
     active_lock = threading.Lock()
@@ -164,14 +174,44 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                 opened = True
                 emit('telnet.session', 'open', 'accepted', session_id, {'peer': peer[0]})
                 client.sendall(PROMPT)
+                upload_name = None
+                upload_lines = bytearray()
                 while not stop.is_set():
                     command, truncated = read_line(client, MAX_COMMAND, True, line_state)
                     if command is None:
                         break
+                    if upload_name is not None:
+                        if command == '.':
+                            try:
+                                reply = (control.upload(upload_name, bytes(upload_lines)) + '\r\n').encode()
+                                outcome = 'accepted'
+                            except ControlError as error:
+                                reply = (str(error) + '\r\n').encode()
+                                outcome = 'rejected'
+                            emit('telnet.upload', 'upload', outcome, session_id,
+                                 {'filename': upload_name, 'bytes': len(upload_lines)})
+                            upload_name = None
+                            upload_lines.clear()
+                            client.sendall(reply + PROMPT)
+                        elif truncated or len(upload_lines) + len(command.encode()) + 1 > MAX_UPLOAD:
+                            upload_name = None
+                            upload_lines.clear()
+                            client.sendall(b'G-code upload exceeds the limit\r\n' + PROMPT)
+                        else:
+                            upload_lines.extend(command.encode() + b'\n')
+                        continue
                     if command:
                         emit('telnet.command', 'execute', 'observed', session_id,
                              {**command_metadata(command), 'truncated': truncated})
-                    reply, should_exit = response(command)
+                    if command.lower().startswith('upload '):
+                        name = command[7:].strip()
+                        if control is not None and FILENAME.fullmatch(name):
+                            upload_name = name
+                            client.sendall(b'Paste G-code; finish with a single . line\r\n')
+                        else:
+                            client.sendall(b'Use upload NAME.gcode\r\n' + PROMPT)
+                        continue
+                    reply, should_exit = response(command, control)
                     client.sendall(reply)
                     if should_exit:
                         break
@@ -225,13 +265,16 @@ def main(argv=None):
     parser.add_argument('--instance-id', required=True)
     parser.add_argument('--platform', required=True)
     parser.add_argument('--ready-file', type=Path)
+    parser.add_argument('--control-port', type=int)
+    parser.add_argument('--runtime-dir', type=Path)
     args = parser.parse_args(argv)
     username = os.environ.pop('HONEYPRINT_TELNET_USERNAME', None)
     password = os.environ.pop('HONEYPRINT_TELNET_PASSWORD', None)
     if not username or not password:
         parser.error('Telnet credentials are missing')
+    control = PrinterControl(args.platform, args.control_port, args.runtime_dir, args.instance_id) if args.control_port else None
     serve(args.host, args.port, username, password, args.database,
-          args.instance_id, args.platform, args.ready_file)
+          args.instance_id, args.platform, args.ready_file, control)
 
 
 if __name__ == '__main__':

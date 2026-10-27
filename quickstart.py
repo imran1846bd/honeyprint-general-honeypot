@@ -216,6 +216,10 @@ def main(argv=None):
                     raise RuntimeError('SSH service startup failed')
         if telnet_enabled:
             instance=config['instances'][0]
+            control_args=(['--control-port',str(instance['services']['web_port']),
+                           '--runtime-dir',str(runtime)]
+                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','klipper','custom_lab')
+                          and instance['simulation'] in ('virtual_printer','avr_sim','lab_sim') else [])
             telnet_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-telnet-')
             telnet_ready=Path(telnet_ready_directory.name)/'ready'
             telnet_env=os.environ.copy()
@@ -224,7 +228,7 @@ def main(argv=None):
             telnet_command=[sys.executable,'-m','services.telnet_decoy',
                 '--host',telnet_host,'--port',str(telnet_port),'--database',str(database),
                 '--instance-id',instance['id'],'--platform',instance['platform'],
-                '--ready-file',str(telnet_ready)]
+                '--ready-file',str(telnet_ready),*control_args]
             children.append(subprocess.Popen(telnet_command,cwd=ROOT,env=telnet_env,start_new_session=True))
             deadline=time.monotonic()+10
             while not telnet_ready.exists():
