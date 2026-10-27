@@ -7,12 +7,14 @@ from pathlib import Path
 import signal
 import socket
 import threading
+import time
 from uuid import uuid4
 
 import paramiko
 
 from telemetry.normalizer import normalize_event
 from telemetry.sqlite_storage import SQLiteStorage
+from services.printer_control import PrinterControl, ControlError, FILENAME, MAX_UPLOAD
 
 
 PROMPT = b'printer@honeyprint:~$ '
@@ -27,13 +29,22 @@ def command_metadata(command):
     return {'command': name, 'length': len(command)}
 
 
-def response(command):
-    """Return a fixed simulated reply and exit code, without touching host state."""
+def response(command, control=None):
+    """Return a bounded virtual-printer reply without invoking a host shell."""
     verb = command.strip().split(' ', 1)[0].lower()
     if verb in ('exit', 'logout'):
         return b'logout\r\n', 0, True
     if verb in ('', 'help', '?'):
-        return b'Commands: help, status, M105, M115, ls, pwd, whoami, exit\r\n', 0, False
+        if control is not None and verb:
+            reply, _ = control.execute('help')
+            return (reply + '\r\n').encode(), 0, False
+        return b'Commands: help, status, M105, M114, M115, G28, G0, G1, G90, G91, M82, M83, M104, M140, connect, start, pause, resume, cancel, ls, pwd, whoami, exit\r\n', 0, False
+    if control is not None and verb not in ('ls', 'pwd', 'whoami'):
+        try:
+            reply, _ = control.execute(command)
+            return (str(reply) + '\r\n').encode(), 0, False
+        except ControlError as error:
+            return (str(error) + '\r\n').encode(), 1, False
     if verb in ('status', 'm105'):
         return b'Printer: idle\r\nT:25.0 /0.0 B:25.0 /0.0\r\n', 0, False
     if verb == 'm115':
@@ -105,7 +116,7 @@ def host_key(path):
     return key
 
 
-def serve(host, port, username, password, database, instance_id, platform, key_path, ready_file=None):
+def serve(host, port, username, password, database, instance_id, platform, key_path, ready_file=None, control=None):
     stop = threading.Event()
     active = set()
     active_lock = threading.Lock()
@@ -160,12 +171,42 @@ def serve(host, port, username, password, database, instance_id, platform, key_p
                             command = session.command[:MAX_COMMAND]
                             emit('ssh.command', 'execute', 'observed', session.session_id,
                                  {**command_metadata(command), 'truncated': len(session.command) > MAX_COMMAND})
-                            reply, code, _ = response(command)
+                            if command.lower().startswith('upload '):
+                                name = command[7:].strip()
+                                content = bytearray()
+                                deadline = time.monotonic() + 15
+                                try:
+                                    if control is None or not FILENAME.fullmatch(name):
+                                        raise ControlError('Use upload NAME.gcode with a local UTF-8 file on stdin')
+                                    while time.monotonic() < deadline:
+                                        try:
+                                            chunk = channel.recv(4096)
+                                        except socket.timeout:
+                                            continue
+                                        if not chunk:
+                                            break
+                                        content.extend(chunk)
+                                        if len(content) > MAX_UPLOAD:
+                                            raise ControlError('G-code upload exceeds 1 MiB')
+                                        deadline = time.monotonic() + 15
+                                    else:
+                                        raise ControlError('G-code upload timed out')
+                                    reply = (control.upload(name, bytes(content)) + '\r\n').encode()
+                                    code = 0
+                                except ControlError as error:
+                                    reply = (str(error) + '\r\n').encode()
+                                    code = 1
+                                emit('ssh.upload', 'upload', 'accepted' if code == 0 else 'rejected',
+                                     session.session_id, {'filename': name[:128], 'bytes': len(content)})
+                            else:
+                                reply, code, _ = response(command, control)
                             channel.sendall(reply)
                             channel.send_exit_status(code)
                             continue
                         channel.sendall(b'HoneyPrint virtual printer console\r\n' + PROMPT)
                         buffer = bytearray()
+                        upload_name = None
+                        upload_lines = bytearray()
                         while not stop.is_set() and transport.is_active():
                             try:
                                 data = channel.recv(1024)
@@ -177,10 +218,39 @@ def serve(host, port, username, password, database, instance_id, platform, key_p
                                 if byte in (10, 13):
                                     command = buffer.decode('utf-8', 'replace')
                                     buffer.clear()
+                                    if upload_name is not None:
+                                        if command == '.':
+                                            try:
+                                                reply = (control.upload(upload_name, bytes(upload_lines)) + '\r\n').encode()
+                                                outcome = 'accepted'
+                                            except ControlError as error:
+                                                reply = (str(error) + '\r\n').encode()
+                                                outcome = 'rejected'
+                                            emit('ssh.upload', 'upload', outcome, session.session_id,
+                                                 {'filename': upload_name, 'bytes': len(upload_lines)})
+                                            upload_name = None
+                                            upload_lines.clear()
+                                            channel.sendall(b'\r\n' + reply + PROMPT)
+                                        elif len(upload_lines) + len(command.encode()) + 1 > MAX_UPLOAD:
+                                            upload_name = None
+                                            upload_lines.clear()
+                                            channel.sendall(b'\r\nG-code upload exceeds 1 MiB\r\n' + PROMPT)
+                                        else:
+                                            upload_lines.extend(command.encode() + b'\n')
+                                            channel.sendall(b'\r\n')
+                                        continue
                                     if command:
                                         emit('ssh.command', 'execute', 'observed', session.session_id,
                                              command_metadata(command))
-                                    reply, _, should_exit = response(command)
+                                    if command.lower().startswith('upload '):
+                                        name = command[7:].strip()
+                                        if control is not None and FILENAME.fullmatch(name):
+                                            upload_name = name
+                                            channel.sendall(b'\r\nPaste G-code; finish with a single . line\r\n')
+                                        else:
+                                            channel.sendall(b'\r\nUse upload NAME.gcode\r\n' + PROMPT)
+                                        continue
+                                    reply, _, should_exit = response(command, control)
                                     channel.sendall(b'\r\n' + reply)
                                     if should_exit:
                                         return
@@ -236,13 +306,16 @@ def main(argv=None):
     parser.add_argument('--platform', required=True)
     parser.add_argument('--host-key', type=Path, required=True)
     parser.add_argument('--ready-file', type=Path)
+    parser.add_argument('--control-port', type=int)
+    parser.add_argument('--runtime-dir', type=Path)
     args = parser.parse_args(argv)
     password = os.environ.pop('HONEYPRINT_SSH_PASSWORD', None)
     username = os.environ.pop('HONEYPRINT_SSH_USERNAME', None)
     if not password or not username:
         parser.error('SSH credentials are missing')
+    control = PrinterControl(args.platform, args.control_port, args.runtime_dir, args.instance_id) if args.control_port else None
     serve(args.host, args.port, username, password, args.database,
-          args.instance_id, args.platform, args.host_key, args.ready_file)
+          args.instance_id, args.platform, args.host_key, args.ready_file, control)
 
 
 if __name__ == '__main__':

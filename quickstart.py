@@ -195,6 +195,10 @@ def main(argv=None):
                 raise RuntimeError('Framework startup failed')
         if ssh_enabled:
             instance=config['instances'][0]
+            control_args=(['--control-port',str(instance['services']['web_port']),
+                           '--runtime-dir',str(runtime)]
+                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','klipper','custom_lab')
+                          and instance['simulation'] in ('virtual_printer','avr_sim','lab_sim') else [])
             ssh_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-ssh-')
             ssh_ready=Path(ssh_ready_directory.name)/'ready'
             ssh_env=os.environ.copy()
@@ -203,7 +207,7 @@ def main(argv=None):
             ssh_command=[sys.executable,'-m','services.ssh_decoy',
                 '--host',ssh_host,'--port',str(ssh_port),'--database',str(database),
                 '--instance-id',instance['id'],'--platform',instance['platform'],
-                '--host-key',str(runtime/'ssh_host_key'),'--ready-file',str(ssh_ready)]
+                '--host-key',str(runtime/'ssh_host_key'),'--ready-file',str(ssh_ready),*control_args]
             children.append(subprocess.Popen(ssh_command,cwd=ROOT,env=ssh_env,start_new_session=True))
             deadline=time.monotonic()+10
             while not ssh_ready.exists():
