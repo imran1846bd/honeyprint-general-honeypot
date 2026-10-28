@@ -28,6 +28,8 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
         self._worker = None
         self._lock = threading.Lock()
         self._sent = self._dropped = self._errors = self._received = 0
+        self._position = None
+        self._position_sequence = 0
         self._target = None
         self._token = None
         self._flags = {}
@@ -99,6 +101,11 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
     def gcode_received(self, comm, line, *args, **kwargs):
         with self._lock:
             self._received += 1
+            if isinstance(line, str):
+                match = re.search(r'\bX:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)\b', line)
+                if match:
+                    self._position = {axis: float(value) for axis, value in zip(('x', 'y', 'z'), match.groups())}
+                    self._position_sequence += 1
         return line
 
     def after_request(self, response):
@@ -124,7 +131,8 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
             return jsonify(instance_id=self._settings.get(['instance_id']),
                            active=bool(self._worker and self._worker.is_alive()),
                            sent=self._sent, dropped=self._dropped, errors=self._errors,
-                           serial_received=self._received, queued=self._queue.qsize())
+                           serial_received=self._received, queued=self._queue.qsize(),
+                           position=self._position, position_sequence=self._position_sequence)
 
 
 __plugin_name__ = 'HoneyPrint Audit'

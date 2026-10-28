@@ -8,6 +8,7 @@ import http.client
 import json
 from pathlib import Path
 import re
+import time
 from uuid import uuid4
 
 
@@ -17,7 +18,8 @@ FILENAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.gcode$', re.I)
 MAX_UPLOAD = 1048576
 
 COMMANDS = (
-    'status / temperature / position: read current virtual printer state',
+    'status / temperature: read current virtual printer state',
+    'position / M114: read virtual coordinates (after connection; if supported)',
     'gcodes: list available G-code with examples',
     'files: list uploaded G-code files',
     'upload NAME.gcode: enter G-code lines; finish with a single . line',
@@ -271,6 +273,17 @@ class PrinterControl:
             return (f"Printer: {state['state']}\nT:{state['tool']:.1f} /{state['tool_target']:.1f} "
                     f"B:{state['bed']:.1f} /{state['bed_target']:.1f}", state)
         if verb == 'm114':
+            if self.platform == 'octoprint':
+                before = self._request('GET', '/api/plugin/honeyprint_audit').get('position_sequence', 0)
+                self._send_gcode('M114')
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    data = self._request('GET', '/api/plugin/honeyprint_audit')
+                    position = data.get('position')
+                    if data.get('position_sequence', 0) > before and isinstance(position, dict):
+                        return f"Position: X:{position['x']:.2f} Y:{position['y']:.2f} Z:{position['z']:.2f}", self.snapshot()
+                    time.sleep(0.1)
+                raise ControlError('No position reply from the virtual printer; connect it and try again')
             state = self.snapshot()
             if 'position' not in state:
                 raise ControlError('Position unavailable')
@@ -285,6 +298,8 @@ class PrinterControl:
                 raise ControlError('No G-code file selected. Upload a file, then select NAME.gcode')
             if self.platform == 'klipper':
                 self._request('POST', '/printer/print/' + verb)
+            elif self.platform == 'octoprint' and verb in ('pause', 'resume'):
+                self._request('POST', '/api/job', {'command': 'pause', 'action': verb})
             else:
                 self._request('POST', '/api/job', {'command': verb})
             return f'{verb} accepted', self.snapshot()
