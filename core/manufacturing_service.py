@@ -32,6 +32,8 @@ class ManufacturingService:
                 raise RuntimeError('Manufacturing service is closed')
             if self._failed:
                 raise RuntimeError('Manufacturing evidence failed; create a new service before further jobs')
+            if type(content) is not bytes or not 1 <= len(content) <= self.artifacts.max_file_bytes:
+                raise ValueError('Artifact exceeds configured retention file limit')
             candidate = deepcopy(self.simulator)
             result, events = run_job(content, candidate, self.stages, name=name, factories=self.factories)
             artifact = self.artifacts.store(content)
