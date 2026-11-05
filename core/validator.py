@@ -20,7 +20,7 @@ class ConfigValidationError(ValueError):
 
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]*\Z")
-_ROOT_KEYS = {"schema_version", "instances", "telemetry"}
+_ROOT_KEYS = {"schema_version", "instances", "telemetry", "runtime"}
 _INSTANCE_KEYS = {
     "id", "platform", "adapter", "deployment", "printer_profile", "simulation",
     "octoprint_settings", "klipper_settings", "services", "stages", "instrumentation", "frontend", "api", "extensions", "recipe",
@@ -153,6 +153,22 @@ def validate_config(config: dict[str, Any], registry: PluginRegistry) -> None:
         for flag in _TELEMETRY_KEYS - {"backend"}:
             if type(telemetry.get(flag)) is not bool:
                 issues.append(f"telemetry.{flag}: expected a boolean")
+    from core.runtime_settings import resolve_settings
+    try:
+        options=resolve_settings(config.get('runtime', {}))
+        from core.runtime_settings import DEFAULTS
+        for cfg in instances:
+            if not isinstance(cfg,dict): continue
+            if cfg.get('platform')=='octoprint' and cfg.get('deployment')=='attach':
+                managed_only=('camera_source','camera_enabled','preheat_hotend_c','preheat_bed_c','request_max_bytes','upload_max_bytes')
+                if any(options[k]!=DEFAULTS[k] for k in managed_only):
+                    issues.append('runtime: camera, preheat and HTTP limit overrides require managed OctoPrint')
+            if options['camera_source'] != 'auto' and cfg.get('platform') != 'octoprint':
+                issues.append('runtime.camera_source: explicit source requires OctoPrint camera support')
+            if cfg.get('platform')=='custom' and any(options[k]!=DEFAULTS[k] for k in ('preheat_hotend_c','preheat_bed_c')):
+                issues.append('runtime.preheat: external custom code/API has no standard heater command contract')
+    except ValueError as error:
+        issues.append(str(error))
     if issues:
         raise ConfigValidationError(issues)
 
