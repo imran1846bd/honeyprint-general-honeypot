@@ -26,8 +26,8 @@ def validate_finding(finding):
 
 
 class AlertStore:
-    def __init__(self, path: Path):
-        self._connection = sqlite3.connect(str(path), timeout=5, check_same_thread=False)
+    def __init__(self, path: Path, *, timeout=5):
+        self._connection = sqlite3.connect(str(path), timeout=timeout, check_same_thread=False)
         self._lock = RLock()
         with self._connection:
             self._connection.execute('PRAGMA synchronous=FULL')
