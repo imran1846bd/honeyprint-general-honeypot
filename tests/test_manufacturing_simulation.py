@@ -3,6 +3,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import socket
+import time
 from tempfile import TemporaryDirectory
 import unittest
 import urllib.request
@@ -18,6 +19,7 @@ from plugins.manufacturing.pipeline import STAGES, run_job
 from plugins.manufacturing.job_intake import job_intake
 from telemetry.analysis.evidence import EvidenceReader
 from telemetry.artifact_storage import ArtifactStorage
+from services.printer_control import PrinterControl
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = {'volume': {'width': 220, 'depth': 220, 'height': 250}, 'heated_bed': True}
@@ -127,6 +129,37 @@ class SimulationTests(unittest.TestCase):
                 stages = [event['action'] for event in events if event['event_type'] == 'manufacturing.stage']
                 self.assertEqual(stages, list(STAGES))
                 self.assertNotIn(JOB.decode(), json.dumps(events))
+
+    def test_custom_lab_uploaded_job_has_live_web_progress(self):
+        with TemporaryDirectory() as tmp, socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]; probe.close()
+            root = Path(tmp)/'runtime'
+            config = {'schema_version': 1, 'instances': [{
+                'id': 'custom_01', 'platform': 'custom_lab', 'deployment': 'managed',
+                'simulation': 'lab_sim', 'services': {'web_port': port}, 'stages': list(STAGES),
+                'printer_profile': str(ROOT/'configs/profiles/virtual_lab.yaml'),
+            }], 'telemetry': {'backend': 'sqlite', 'capture_requests': True,
+                             'capture_commands': True, 'capture_state_changes': True}}
+            app = FrameworkRuntime(config, create_builtin_registry(runtime_dir=root), base_dir=ROOT, runtime_dir=root)
+            def ready(instance, report):
+                control = PrinterControl('custom_lab', port)
+                self.assertIn('Uploaded', control.upload('demo.gcode', b'G28\nG1 X10 F600\n'))
+                self.assertIn('demo.gcode', control.files())
+                self.assertIn('G1 X10', control.file_action('show', 'demo.gcode'))
+                self.assertIn('File selected', control.execute('select demo.gcode')[0])
+                self.assertIn('start accepted', control.execute('start')[0])
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=2) as page:
+                    self.assertIn(b'setInterval(refresh,500)', page.read())
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/job', timeout=2) as response:
+                        job = json.load(response)
+                    if job['state'] == 'complete': break
+                    time.sleep(.05)
+                self.assertEqual(job['state'], 'complete')
+                self.assertEqual(job['progress'], 100.0)
+                self.assertEqual(control.snapshot()['position']['x'], 10)
+            app.run(duration=0.2, on_ready=ready)
 
 
 if __name__ == '__main__': unittest.main()

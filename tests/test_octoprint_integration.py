@@ -18,6 +18,7 @@ from core.builtin_registry import create_builtin_registry
 from core.runtime import FrameworkRuntime
 from deployment.control import stop_running
 from telemetry.sqlite_storage import SQLiteStorage
+from services.printer_control import PrinterControl
 
 
 OCTOPRINT_PYTHON = os.environ.get('HONEYPRINT_OCTOPRINT_PYTHON')
@@ -71,6 +72,28 @@ class OctoPrintIntegrationTests(unittest.TestCase):
                         self.assertIn('Loaded ', (camera.root / 'camera-console.log').read_text())
                     ready.append(('camera', camera.port))
                 api_request(handle, 'POST', '/api/printer/command', {'command': 'M105'})
+                console = PrinterControl('octoprint', port, root, 'octo_01')
+                self.assertIn('G0/G1', console.execute('gcodes')[0])
+                self.assertIn('Uploaded', console.upload('demo.gcode', b'G28\nG4 P10000\nG1 X10 F600\n'))
+                self.assertIn('demo.gcode', console.execute('files')[0])
+                self.assertIn('G1 X10 F600', console.execute('show demo.gcode')[0])
+                self.assertIn('ok', console.execute('M104 S175')[0])
+                self.assertIn('/175.0', console.execute('M105')[0])
+                self.assertIn('X:', console.execute('position')[0])
+                self.assertIn('X:', console.execute('M114')[0])
+                for command in ('help', 'status', 'temperature', 'M115', 'home',
+                                'G28', 'G90', 'G91', 'M82', 'M83', 'move X10 Y10 F600',
+                                'G0 X5 Y5 F600', 'G1 X10 Y10 F600', 'run G1 X15 F600',
+                                'heat 180', 'bed 50', 'M140 S45', 'cooldown'):
+                    with self.subTest(command=command):
+                        self.assertTrue(console.execute(command)[0])
+                self.assertIn('File selected', console.execute('select demo.gcode')[0])
+                self.assertIn('start accepted', console.execute('start')[0])
+                self.assertIn('demo.gcode', console.execute('job')[0])
+                self.assertEqual(api_request(handle, 'GET', '/api/job')['job']['file']['name'], 'demo.gcode')
+                self.assertIn('pause accepted', console.execute('pause')[0])
+                self.assertIn('resume accepted', console.execute('resume')[0])
+                self.assertIn('cancel accepted', console.execute('cancel')[0])
                 # Attach only observes this externally managed server.
                 previous = os.environ.get('HONEYPRINT_TEST_ATTACH_KEY')
                 os.environ['HONEYPRINT_TEST_ATTACH_KEY'] = handle.api_key

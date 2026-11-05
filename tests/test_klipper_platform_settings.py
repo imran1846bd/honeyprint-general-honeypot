@@ -32,7 +32,7 @@ class KlipperPlatformSettingsTests(unittest.TestCase):
             }))
             result = build_config({'HONEYPRINT_PLATFORM': 'klipper'}, base, base/'generated')
             config = result['config']
-            validate_config(config, create_builtin_registry(runtime_dir=base))
+            validate_config(config, create_builtin_registry(runtime_dir=base, runtime_settings=config['runtime']))
             selected = config['instances'][0]['klipper_settings']
             native = printer_config(load_profile(config['instances'][0]['printer_profile']), selected)
             for fragment in ('max_velocity: 240', 'max_z_velocity: 25',

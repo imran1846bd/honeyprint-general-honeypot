@@ -9,6 +9,7 @@ import urllib.request
 
 from adapters.klipper.adapter import KlipperAdapter
 from deployment.klipper_environment import docker
+from services.printer_control import PrinterControl
 
 
 @unittest.skipUnless(os.environ.get('HONEYPRINT_TEST_KLIPPER') == '1',
@@ -40,9 +41,19 @@ class KlipperRuntimeTests(unittest.TestCase):
                     headers={'Content-Type': 'application/json'})
                 with urllib.request.urlopen(request, timeout=40) as response:
                     self.assertEqual(response.status, 200)
+                console = PrinterControl('klipper', port)
+                self.assertIn('G-code files:', console.execute('files')[0])
+                self.assertIn('Printer:', console.execute('status')[0])
+                self.assertEqual(console.execute('M104 S175')[0], 'ok')
+                self.assertIn('/175.0', console.execute('M105')[0])
                 state = handle.request('/printer/objects/query?toolhead&extruder&heater_bed&mcu')['status']
                 self.assertEqual(state['toolhead']['position'][:2], [12., 8.])
                 self.assertGreater(state['mcu']['last_stats']['bytes_read'], 0)
+                self.assertIn('Uploaded', console.upload('demo.gcode', b'G28\nG1 X4 F600\n'))
+                self.assertIn('demo.gcode', console.execute('files')[0])
+                self.assertIn('G1 X4 F600', console.execute('show demo.gcode')[0])
+                self.assertIn('Print requested', console.execute('print demo.gcode')[0])
+                self.assertIn('demo.gcode', console.execute('job')[0])
                 blocked = docker('exec', handle.name, '/opt/moonraker-env/bin/python', '-c',
                                  'import socket;s=socket.socket();s.settimeout(2);print(s.connect_ex(("1.1.1.1",80)))')
                 self.assertNotEqual(blocked, '0')

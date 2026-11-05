@@ -109,6 +109,57 @@ class ExtensionAnalysisTests(unittest.TestCase):
                 finally: server.shutdown(); thread.join(timeout=3)
             self.assertEqual(raw.read_bytes(), before)
 
+    def test_dashboard_shows_newest_events_and_live_updates(self):
+        with TemporaryDirectory() as tmp:
+            raw = Path(tmp)/'events.sqlite3'
+            with SQLiteStorage(raw) as storage:
+                storage.write_batch([captured(status=404, number=n) for n in range(3)])
+            with create_server(raw, port=0, page_size=2) as server:
+                thread = Thread(target=server.serve_forever, kwargs={'poll_interval': 0.1})
+                thread.start()
+                try:
+                    url = f'http://127.0.0.1:{server.server_port}'
+                    with urllib.request.urlopen(url+'/api/live') as response:
+                        self.assertEqual([r['sequence'] for r in json.load(response)['events']], [3, 2])
+                    with urllib.request.urlopen(url+'/') as response:
+                        page = response.read().decode()
+                        self.assertIn('dashboard.js', page)
+                        self.assertIn('before=2', page)
+                    with urllib.request.urlopen(url+'/?before=2') as response:
+                        self.assertIn('Older events', response.read().decode())
+                    with SQLiteStorage(raw) as storage:
+                        storage.write_batch([captured(status=404, number=3)])
+                    with urllib.request.urlopen(url+'/api/live') as response:
+                        self.assertEqual([r['sequence'] for r in json.load(response)['events']], [4, 3])
+                    with urllib.request.urlopen(url+'/dashboard.js') as response:
+                        self.assertIn('setInterval(refresh, 3000)', response.read().decode())
+                finally:
+                    server.shutdown(); thread.join(timeout=3)
+
+    def test_dashboard_waits_for_interaction(self):
+        with TemporaryDirectory() as tmp:
+            raw = Path(tmp)/'events.sqlite3'
+            with SQLiteStorage(raw) as storage:
+                storage.write_batch([
+                    captured(kind='framework.lifecycle'),
+                    captured(kind='printer.state'),
+                    captured(status=200, route='/api/printer'),
+                ])
+            with create_server(raw, port=0) as server:
+                thread = Thread(target=server.serve_forever, kwargs={'poll_interval': 0.1})
+                thread.start()
+                try:
+                    url = f'http://127.0.0.1:{server.server_port}'
+                    with urllib.request.urlopen(url+'/api/live') as response:
+                        self.assertEqual(json.load(response), {'events': [], 'findings': []})
+                    with SQLiteStorage(raw) as storage:
+                        storage.write_batch([captured(kind='ssh.auth', outcome='accepted')])
+                    with urllib.request.urlopen(url+'/api/live') as response:
+                        rows = json.load(response)['events']
+                        self.assertEqual([row['event']['event_type'] for row in rows], ['ssh.auth'])
+                finally:
+                    server.shutdown(); thread.join(timeout=3)
+
     def test_real_custom_runtime_command_rejection_and_alerts(self):
         with TemporaryDirectory() as tmp, socket.socket() as probe:
             probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]; probe.close()

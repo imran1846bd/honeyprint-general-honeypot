@@ -58,8 +58,18 @@ class SSHDecoyTests(unittest.TestCase):
                     client.connect('127.0.0.1', port=ports[1], username='admin',
                                    password='admin', allow_agent=False, look_for_keys=False,
                                    timeout=5, auth_timeout=5)
+                    stdin, stdout, stderr = client.exec_command('M104 S180', timeout=5)
+                    self.assertIn('ok', stdout.read().decode())
                     stdin, stdout, stderr = client.exec_command('M105', timeout=5)
-                    self.assertIn('T:25.0', stdout.read().decode())
+                    self.assertIn('/180.0', stdout.read().decode())
+                    stdin, stdout, stderr = client.exec_command('gcodes', timeout=5)
+                    self.assertIn('G0/G1', stdout.read().decode())
+                    stdin, stdout, stderr = client.exec_command('home', timeout=5)
+                    self.assertIn('ok', stdout.read().decode())
+                    stdin, stdout, stderr = client.exec_command('move X10 F600', timeout=5)
+                    self.assertIn('ok', stdout.read().decode())
+                    stdin, stdout, stderr = client.exec_command('position', timeout=5)
+                    self.assertIn('10', stdout.read().decode())
                 finally:
                     client.close()
                 stdout, stderr = process.communicate(timeout=15)
