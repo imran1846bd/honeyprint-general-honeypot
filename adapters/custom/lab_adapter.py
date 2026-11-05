@@ -49,6 +49,7 @@ class LabHandle:
     job_name: str | None = None
     job_state: str = 'idle'
     job_progress: float = 0.0
+    job_generation: int = 0
     job_worker: object = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -76,6 +77,8 @@ class LabHandle:
             self.job_name = name
             self.job_progress = 0.0
             self.job_state = 'printing'
+            self.job_generation += 1
+            generation = self.job_generation
             self.emit('manufacturing.stage', 'build_preparation', 'completed', {'filename': name})
 
         def work():
@@ -86,7 +89,7 @@ class LabHandle:
                     distance = 0.0
                     while not self.stopped.is_set():
                         with self.lock:
-                            if self.job_state == 'cancelled': return
+                            if generation != self.job_generation or self.job_state == 'cancelled': return
                             if self.job_state != 'paused':
                                 if not started:
                                     origin = dict(self.simulator.motion.position)
@@ -107,10 +110,12 @@ class LabHandle:
                         self.stopped.wait(0.1)
                     if self.stopped.is_set(): return
                 with self.lock:
+                    if generation != self.job_generation or self.job_state == 'cancelled': return
                     self.job_state = 'complete'
                     self.emit('manufacturing.stage', 'build_execution', 'completed', {'filename': name})
             except (ValueError, OSError, IndexError):
                 with self.lock:
+                    if generation != self.job_generation or self.job_state == 'cancelled': return
                     self.job_state = 'error'
                     self.emit('manufacturing.stage', 'build_execution', 'failed', {'filename': name})
 
@@ -248,6 +253,9 @@ setInterval(refresh,500);refresh();</script></html>'''
                                     expected={'pause':'printing','resume':'paused','cancel':('printing','paused')}
                                     if h.job_state not in (expected[action] if isinstance(expected[action],tuple) else (expected[action],)): raise ValueError()
                                     h.job_state={'pause':'paused','resume':'printing','cancel':'cancelled'}[action]
+                                    if action == 'cancel':
+                                        h.job_generation += 1
+                                        h.simulator.motion.target = dict(h.simulator.motion.position)
                             else: raise ValueError()
                         self.respond(200, {'command':action,'state':h.job_state,'filename':h.selected})
                         h.emit('printer.job',action,'accepted',{'filename':h.selected})
