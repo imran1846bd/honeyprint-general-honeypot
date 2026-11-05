@@ -10,6 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import math
 from html import escape
 import re
 from core.storage_paths import artifact_root
@@ -80,18 +81,31 @@ class LabHandle:
         def work():
             try:
                 for index, command in enumerate(commands, 1):
+                    started = False
+                    origin = None
+                    distance = 0.0
                     while not self.stopped.is_set():
                         with self.lock:
                             if self.job_state == 'cancelled': return
                             if self.job_state != 'paused':
-                                self.simulator.command(command)
-                                self.simulator.step(1.0)
-                                self.job_progress = index * 100.0 / len(commands)
+                                if not started:
+                                    origin = dict(self.simulator.motion.position)
+                                    self.simulator.command(command)
+                                    distance = math.dist(origin.values(), self.simulator.motion.target.values())
+                                    started = True
+                                self.simulator.step(0.1)
+                                remaining = math.dist(self.simulator.motion.position.values(),
+                                                      self.simulator.motion.target.values())
+                                fraction = 1.0 - remaining / distance if distance else 1.0
+                                self.job_progress = ((index - 1) + fraction) * 100.0 / len(commands)
                                 self.emit('printer.state', 'progress', 'observed',
-                                          {'filename': name, 'progress': self.job_progress})
-                                break
-                        self.stopped.wait(.1)
-                    if self.stopped.wait(.4): return
+                                          {'filename': name, 'progress': self.job_progress,
+                                           'position': dict(self.simulator.motion.position),
+                                           'temperature': self.simulator.hotend.temperature,
+                                           'bed_temperature': self.simulator.bed.temperature})
+                                if remaining <= 1e-6: break
+                        self.stopped.wait(0.1)
+                    if self.stopped.is_set(): return
                 with self.lock:
                     self.job_state = 'complete'
                     self.emit('manufacturing.stage', 'build_execution', 'completed', {'filename': name})
