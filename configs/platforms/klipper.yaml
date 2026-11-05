@@ -1,39 +1,52 @@
-# Klipper-specific configuration. Loaded only for klipper (or all).
-# Set HONEYPRINT_PLATFORM=klipper in .env, then restart ./run.sh after edits.
-# Common port, printer name/build size/nozzle, preheat, logs and analysis stay in .env.
-# The isolated AVR/Moonraker image is rebuilt once when its config schema changes.
+# Settings for the virtual Klipper printer shown through Mainsail.
+# In .env, select HONEYPRINT_PLATFORM=klipper and restart ./run.sh after edits.
+# No physical motor, heater, or printer is changed by this file.
+# Common settings such as the web port, printer name, print area, and log location
+# are in .env. This file only describes Klipper's movement and heat limits.
+# The launcher checks the values and uses them to create Klipper's printer.cfg.
+# Unknown settings or values outside the allowed limits stop startup.
+
+# Format version for this file; this is not the Klipper firmware version.
 schema_version: 1
 
-# Local Klipper source; blank uses the framework's pinned upstream revision.
-# Relative paths start at the project root, not this YAML directory.
+# Folder containing the Klipper code. An empty value uses the pinned upstream code.
+# Relative paths start at the HoneyPrint project folder.
 source: plat/klipper-master
 
-# These values generate native Klipper printer.cfg inside the owned container.
-# Unknown keys, nonnumeric values and out-of-range values stop startup.
 settings:
+  # How fast the virtual printer is allowed to move.
+  # X means left/right, Y means front/back, and Z means up/down.
   motion:
-    max_velocity: 200       # mm/s, 1..500
-    max_accel: 1000         # mm/s², 1..10000
-    max_z_velocity: 20      # mm/s, 1..100; <= max_velocity
-    max_z_accel: 30         # mm/s², 1..1000; <= max_accel
+    max_velocity: 200       # Overall speed limit: 200 mm each second (allowed: 1..500).
+    max_accel: 1000         # How quickly speed can rise/fall, like a car accelerating (1..10000 mm/s²).
+    max_z_velocity: 20      # Up/down speed limit: 20 mm each second (1..100; cannot exceed max_velocity).
+    max_z_accel: 30         # How quickly up/down speed can rise/fall (1..1000 mm/s²; cannot exceed max_accel).
 
+  # Motor settings used to calculate movement distance.
+  # A motor turns in small steps. microsteps divides ONE such step into smaller
+  # parts; it does not divide a whole motor revolution into 16 parts.
+  # rotation_distance says how many mm of movement one full motor turn represents.
+  # Printer designs can combine motors differently; X/Y/Z name directions here.
   steppers:
     x:
-      microsteps: 16        # power of two, 1..256
-      rotation_distance: 40 # mm/revolution, 0.1..100
+      microsteps: 16        # Divide each motor step into 16 smaller parts (power of two, 1..256).
+      rotation_distance: 40 # One full motor turn represents 40 mm left/right (0.1..100).
     y:
-      microsteps: 16
-      rotation_distance: 40
+      microsteps: 16        # Divide each motor step into 16 smaller parts.
+      rotation_distance: 40 # One full motor turn represents 40 mm front/back.
     z:
-      microsteps: 16
-      rotation_distance: 8
+      microsteps: 16        # Divide each motor step into 16 smaller parts.
+      rotation_distance: 8  # One full motor turn represents 8 mm up/down.
 
+  # Extruder: the motor that pushes plastic filament toward the hot nozzle.
   extruder:
-    microsteps: 16
-    rotation_distance: 33.5 # mm/revolution, 0.1..100
-    filament_diameter: 1.75 # mm, 1..3
-    min_extrude_temp: 170   # °C, 0..280; below max_temp
-    max_temp: 280           # °C, 180..300
+    microsteps: 16          # Divide each extruder-motor step into 16 smaller parts.
+    rotation_distance: 33.5 # One full motor turn pushes about 33.5 mm of filament (0.1..100).
+    filament_diameter: 1.75 # Thickness of the plastic filament, not the nozzle opening (1..3 mm).
+    min_extrude_temp: 170   # Do not push filament until the nozzle reaches 170°C (0..280; below max_temp).
+    max_temp: 280           # Do not allow the nozzle above 280°C (180..300).
 
+  # The heated print bed is the warm surface on which the object is made.
+  # This section matters only when HONEYPRINT_HEATED_BED=true in .env.
   heated_bed:
-    max_temp: 130           # °C, 50..150; used when .env enables heated bed
+    max_temp: 130           # Do not allow the bed above 130°C (50..150).

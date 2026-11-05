@@ -66,7 +66,9 @@ class OctoPrintAdapter(PlatformAdapter):
     platform_id = 'octoprint'
 
     def __init__(self, *, runtime_dir: Path, python: Path | None = None,
-                 attach_api_key_env: str | None = None, startup_timeout: float = 60):
+                 attach_api_key_env: str | None = None, startup_timeout: float = 60, common_settings=None):
+        from core.runtime_settings import resolve_settings
+        self.common_settings=resolve_settings(common_settings)
         self.runtime_dir = Path(runtime_dir).absolute()
         self.python = Path(python).absolute() if python else None
         self.attach_api_key_env = attach_api_key_env
@@ -123,7 +125,7 @@ class OctoPrintAdapter(PlatformAdapter):
                 self.runtime_dir / cfg['id'], self.python, cfg['id'],
             )
             self._credentials = self._environment.prepare(
-                cfg, audit_port=self._channel.getsockname()[1], audit_token=self._token,
+                cfg, audit_port=self._channel.getsockname()[1], audit_token=self._token, common_settings=self.common_settings,
             )
         except Exception:
             self.cleanup_prepared(plan)

@@ -111,7 +111,9 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
     def after_request(self, response):
         from flask import request
         rule = request.url_rule.rule if request.url_rule else 'unmatched'
-        if self._flags.get('http') and rule != '/api/plugin/<string:name>':
+        interactive = (request.method != 'GET' or response.status_code >= 400
+                       or rule == 'frontend')
+        if self._flags.get('http') and interactive and rule != '/api/plugin/<string:name>':
             self._emit('api', 'http.request', request.method, 'observed',
                        {'route': rule[:256], 'status': response.status_code})
         return response
