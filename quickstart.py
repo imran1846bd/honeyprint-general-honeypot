@@ -290,10 +290,11 @@ def main(argv=None):
                 if time.monotonic()>deadline:raise RuntimeError('Dashboard startup failed')
         links=', '.join(f'http://127.0.0.1:{i["services"]["web_port"]}' for i in config['instances'])
         print(f'Local services ready. Honeypot: {links}. Logs: {database}. Ctrl-C stops all services.',flush=True)
+        if settings['analysis_enabled']:print(f'Analysis findings: {alerts}',flush=True)
         if ssh_enabled:print(f'SSH decoy: ssh -p {ssh_port} {selected["ssh_username"]}@127.0.0.1',flush=True)
         if telnet_enabled:print(f'Telnet decoy: telnet 127.0.0.1 {telnet_port}',flush=True)
         if mqtt_enabled:print(f'MQTT decoy: 127.0.0.1:{mqtt_port}, topic honeyprint/{instance["id"]}/#',flush=True)
-        if args.analyst_enabled:print(f'Optional analyst dashboard: http://127.0.0.1:{args.dashboard_port}',flush=True)
+        if args.analyst_enabled:print(f'Analyst dashboard: http://127.0.0.1:{args.dashboard_port} (port {args.dashboard_port})',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
             if children[0].poll() == 0:break  # Explicit framework stop also closes companion services.

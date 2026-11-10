@@ -1,7 +1,7 @@
 # OctoPrint-specific configuration. Loaded only for octoprint (or all).
 # Select HONEYPRINT_PLATFORM=octoprint in .env to use this file.
 # Restart ./run.sh after editing. Common values remain in .env:
-# port, printer name/geometry, preheat, camera, logs, upload limits and analysis.
+# port, printer name/geometry, preheat, camera, logs and analysis.
 # The common printer profile supplies the build volume, nozzle and heated bed;
 # the virtual printer stays enabled by the managed OctoPrint adapter.
 # Paths below resolve relative to the project root, not this YAML directory.
@@ -18,6 +18,11 @@ python: ''
 # Native OctoPrint option names. Unknown fields/types are rejected at startup.
 # Managed virtual printer only; not applied to Klipper or custom platforms.
 settings:
+  uploads:
+    # Maximum G-code upload: 32 MiB; change here for OctoPrint only.
+    # Allowed: 1 byte through 64 MiB. Restart ./run.sh to apply.
+    maxSize: 33554432
+
   appearance:
     # default | red | orange | yellow | green | blue | violet
     color: default
