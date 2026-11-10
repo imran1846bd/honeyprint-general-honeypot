@@ -2,7 +2,7 @@
 
 HoneyPrint is a proposed configuration-driven framework for additive manufacturing (AM) honeypot research. This README follows the design in *HoneyPrint Academic Framework: OctoPrint, Klipper and Custom* and maps it to the current repository structure.
 
-**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and read-only evidence dashboard are also implemented. Five manufacturing stages, simplified physical models and private G-code artifact retention are implemented for the custom example. A source-pinned upstream Klipper and Moonraker backend now runs compiled AVR firmware through SimulAVR, with verified MCU readiness, a bounded loopback JSON bridge, state observations and owned container cleanup. Pinned Mainsail assets, live native WebSocket subscriptions, command submission evidence and retained native G-code upload/download are implemented. Uploaded files can execute through Klipper virtual SD and report native print completion. The architecture below remains the full target framework.
+**Implementation status:** the local OctoPrint prototype now supports validated profiles, pinned deployment recipes, managed Virtual Printer startup, passive audit capture, normalized events, bounded queuing, transactional SQLite storage, verified readiness and graceful stop/restart. Read-only attachment supports state polling. A runnable custom HTTP adapter example, versioned extension SDK, rule findings, incremental local alert watcher and evidence dashboard with CSV export and log clearing are also implemented. Five manufacturing stages, simplified physical models and private G-code artifact retention are implemented for the custom example. A source-pinned upstream Klipper and Moonraker backend now runs compiled AVR firmware through SimulAVR, with verified MCU readiness, a bounded loopback JSON bridge, state observations and owned container cleanup. Pinned Mainsail assets, live native WebSocket subscriptions, command submission evidence and retained native G-code upload/download are implemented. Uploaded files can execute through Klipper virtual SD and report native print completion. The architecture below remains the full target framework.
 
 ## One configuration and one honeypot URL
 
@@ -38,7 +38,8 @@ Set the following values in `.env`:
 HONEYPRINT_PLATFORM=octoprint
 HONEYPRINT_PORT=8081
 HONEYPRINT_RUNTIME_DIR=.honeyprint/quickstart
-HONEYPRINT_ANALYST_ENABLED=false
+HONEYPRINT_ANALYST_ENABLED=true
+HONEYPRINT_DASHBOARD_PORT=8090
 ```
 
 Start the selected honeypot:
@@ -143,14 +144,14 @@ Every selection writes normalized framework evidence to the same runtime directo
 
 Events retain platform and instance identity, so records from earlier selections remain distinguishable after a switch. Custom HTTP capture records methods, route category and status without request bodies or credentials. Platform console logs and source-supplied audit plugins can have separate files; the shared database is the framework's normalized evidence store. The analysis watcher is controlled by `HONEYPRINT_ANALYSIS_ENABLED`, independently of the web dashboard. With analysis disabled, the dashboard still serves evidence and shows no findings.
 
-An analyst dashboard is optional. Enable it only when you want a separate interface for reviewing evidence:
+The default `.env` starts the analyst dashboard with `./run.sh`:
 
 ```dotenv
 HONEYPRINT_ANALYST_ENABLED=true
 HONEYPRINT_DASHBOARD_PORT=8090
 ```
 
-This adds the read-only analyst interface at http://127.0.0.1:8090. It is not required to run the selected honeypot or collect its framework logs.
+The terminal prints its URL and port after readiness. Open http://127.0.0.1:8090 to review the selected platform's interactions and print-job evidence. OctoPrint, Klipper and custom use the same evidence and analysis database paths when selected; records retain their platform and instance IDs. Set `HONEYPRINT_ANALYST_ENABLED=false` or use `--no-analyst` to run without the dashboard; evidence capture continues.
 
 ## Profiles and advanced configuration
 
@@ -618,7 +619,7 @@ python -m telemetry.analysis.service --database .honeyprint/events.sqlite3 --ale
 python -m dashboard.server --database .honeyprint/events.sqlite3 --alerts .honeyprint/analysis.sqlite3
 ```
 
-The dashboard listens at `http://127.0.0.1:8090`, shows recent access and control interactions first, and refreshes its interaction and finding tables every three seconds. Startup and background polling records are hidden from the default view; the raw `GET /api/events` and findings `GET /api/alerts` APIs remain available. It supports instance/type filters and bounded pagination, opens databases read-only, escapes captured text, and rejects POST writes. Derived findings are stored separately from raw evidence.
+The dashboard listens at `http://127.0.0.1:8090`, shows recent access and control interactions first, and refreshes its interaction and finding tables every three seconds. Startup and background polling records are hidden from the default view; the raw `GET /api/events` and findings `GET /api/alerts` APIs remain available. It supports instance/type filters and bounded pagination. **Download all logs (CSV)** exports the complete event history. **Clear captured logs** removes captured events and analysis findings after confirmation while preserving framework lifecycle markers needed by the running service. The clear action is limited to the loopback dashboard and requires its page token; the ordinary query APIs remain read-only.
 
 For ongoing local notifications, run the analysis command with `--watch` alongside the framework. Findings cover denied API access, unknown endpoints, emergency-stop commands, rejected commands and platform interruptions. They are contextual indicators, not confirmed attacks. Checkpoints and deterministic finding IDs prevent duplicate results on restart. No email, messaging service or ML classifier is configured.
 

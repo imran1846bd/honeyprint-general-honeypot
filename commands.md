@@ -1,6 +1,6 @@
 # HoneyPrint: SSH, Telnet and MQTT printer commands
 
-The current `.env` selects OctoPrint on port 8084. SSH uses 2223, Telnet 2323, and MQTT 1884. The sample username and password are `admin` / `admin`; use the values in `.env` if changed. All three interfaces control the same selected **virtual** printer. Editing `.env` requires stopping and restarting the launcher.
+The current `.env` selects OctoPrint on port 8084, but `HONEYPRINT_PLATFORM=klipper ./run.sh` selects Klipper for that run. SSH uses 2223, Telnet 2323, and MQTT 1884. The sample username and password are `admin` / `admin`; use the values in `.env` if changed. All three interfaces control the same selected **virtual** printer. Editing `.env` requires stopping and restarting the launcher.
 
 ## Start
 
@@ -8,10 +8,12 @@ Keep this terminal open while using the honeypot:
 
 ```bash
 cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
-./run.sh --analyst
+./run.sh
 ```
 
-Open the printer at `http://127.0.0.1:8084/` and the optional analyst dashboard at `http://127.0.0.1:8090/`. If the runtime is already running, stop its original terminal with Ctrl-C and wait for shutdown. If that terminal is gone, run `./.venv/bin/python main.py stop --runtime-dir .honeyprint/quickstart` before restarting.
+To run Klipper instead, stop the current run and use `HONEYPRINT_PLATFORM=klipper ./run.sh`. Run only one selected platform on this port at a time.
+
+Open the printer at `http://127.0.0.1:8084/` and the analyst dashboard at `http://127.0.0.1:8090/`. If the runtime is already running, stop its original terminal with Ctrl-C and wait for shutdown. If that terminal is gone, run `./.venv/bin/python main.py stop --runtime-dir .honeyprint/quickstart` before restarting.
 
 ## SSH
 
@@ -76,27 +78,51 @@ If `telnet` is unavailable, use `nc 127.0.0.1 2323`. Enter the Telnet username a
 
 ## MQTT
 
-Start a subscriber in one terminal. The selected OctoPrint instance ID is `octo_01` unless `HONEYPRINT_INSTANCE_ID` has been changed:
+Only the **running platform's** topic is accepted. Use the OctoPrint block when `octo_01` is running, or the Klipper block when `klipper_01` is running. If `HONEYPRINT_INSTANCE_ID` is set, replace that ID in every topic. Keep Terminal 1 open to see responses and state updates. MQTT uploads accept files up to about 60 KiB.
+
+### OctoPrint MQTT commands
+
+Terminal 1 — subscribe:
 
 ```bash
 mosquitto_sub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/#' -v
 ```
 
-Publish one command in another terminal:
+Terminal 2 — send commands in this order:
 
 ```bash
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'gcodes'
+cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'connect'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'M104 S180'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'M105'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'files'
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'status'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/upload/demo.gcode' -f examples/console_demo.gcode
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'files'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'select demo.gcode'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'start'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'job'
 ```
 
-Read the response and state topics in the subscriber terminal. The MQTT upload packet is limited to about 60 KiB. MQTT also publishes new printer state when the web UI changes it. To use Klipper, change the topic to `honeyprint/klipper_01/command` (or `/upload/NAME.gcode`) after selecting Klipper in `.env` and restarting. For the built-in custom lab, use `honeyprint/custom_01/command` and `honeyprint/custom_01/upload/NAME.gcode`.
+`connect` attaches OctoPrint to its virtual printer. `select` loads the uploaded file, and `start` begins it. Terminal 1 shows `response`, `state` and `temperature` topics.
+
+### Klipper MQTT commands
+
+Terminal 1 — subscribe:
+
+```bash
+mosquitto_sub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/#' -v
+```
+
+Terminal 2 — send commands in this order:
+
+```bash
+cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/command' -m 'status'
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/upload/demo.gcode' -f examples/console_demo.gcode
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/command' -m 'files'
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/command' -m 'print demo.gcode'
+mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/command' -m 'job'
+```
+
+Klipper uses `print demo.gcode` to load and start the file in one command. Separate `select` and `connect` commands are for OctoPrint, so do not send them to Klipper. For a built-in custom lab run, replace the topic prefix with `honeyprint/custom_01`.
 
 ## Commands and limits
 
@@ -113,23 +139,3 @@ sqlite3 -header -column .honeyprint/quickstart/events.sqlite3 "SELECT sequence, 
 ```
 
 Stop the launcher with Ctrl-C. A new `.env` configuration takes effect on the next run.
-
-mqtt
-terminal 1
-
-
-mosquitto_sub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/#' -v
-
-
-
-cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
-
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'connect'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'status'
-
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/upload/demo.gcode' -f examples/console_demo.gcode
-
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'files'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'select demo.gcode'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'start'
-mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'job'
