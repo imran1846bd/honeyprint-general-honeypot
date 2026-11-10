@@ -80,6 +80,7 @@ class KlipperEnvironment:
     def request(self, path):
         """Read native Moonraker through Docker exec without giving it host networking."""
         if path not in ('/server/info', '/printer/objects/query?toolhead&extruder&heater_bed&mcu',
+                        '/printer/objects/query?toolhead&extruder&heater_bed&mcu&print_stats&virtual_sdcard',
                         '/server/gcode_store?count=100'):
             raise AdapterError('Unsupported observation endpoint')
         code = ('import json,urllib.request; '

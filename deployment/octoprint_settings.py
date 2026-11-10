@@ -21,10 +21,17 @@ BOUNDS = {'throttle': (0, 1), 'waitInterval': (0.1, 60),
 def resolve_octoprint_settings(value=None):
     if value is None:
         value = {}
-    if not isinstance(value, Mapping) or set(value) - set(DEFAULTS):
+    if not isinstance(value, Mapping) or set(value) - (set(DEFAULTS) | {'uploads'}):
         raise ValueError('octoprint settings: unknown section or expected mapping')
     result = deepcopy(DEFAULTS)
     for section, supplied in value.items():
+        if section == 'uploads':
+            if (not isinstance(supplied, Mapping) or set(supplied) != {'maxSize'}
+                    or type(supplied['maxSize']) is not int
+                    or not 1 <= supplied['maxSize'] <= 67108864):
+                raise ValueError('octoprint.uploads.maxSize: expected 1..67108864 bytes')
+            result['uploads'] = {'maxSize': supplied['maxSize']}
+            continue
         if not isinstance(supplied, Mapping) or set(supplied) - set(DEFAULTS[section]):
             raise ValueError(f'octoprint.{section}: unknown option or expected mapping')
         for key, item in supplied.items():

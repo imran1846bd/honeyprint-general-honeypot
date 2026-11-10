@@ -21,6 +21,7 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
                      octoprint.plugin.ShutdownPlugin,
                      octoprint.plugin.SettingsPlugin,
                      octoprint.plugin.EventHandlerPlugin,
+                     octoprint.plugin.ProgressPlugin,
                      octoprint.plugin.SimpleApiPlugin):
     def __init__(self):
         self._queue = queue.Queue(maxsize=1024)
@@ -91,6 +92,24 @@ class HoneyPrintAudit(octoprint.plugin.StartupPlugin,
     def on_event(self, event, payload):
         if self._flags.get('state'):
             self._emit('plugin', 'platform.event', 'state', 'observed', {'event': str(event)[:128]})
+            actions = {'PrintStarted': 'start', 'PrintPaused': 'pause',
+                       'PrintResumed': 'resume', 'PrintCancelled': 'cancel',
+                       'PrintFailed': 'failed', 'PrintDone': 'complete'}
+            if event in actions:
+                details = payload if isinstance(payload, dict) else {}
+                filename = details.get('name') or details.get('path')
+                metadata = {'filename': filename.rsplit('/', 1)[-1][:120]
+                            if isinstance(filename, str) else None}
+                progress = details.get('progress')
+                if type(progress) in (int, float) and 0 <= progress <= 100:
+                    metadata['progress'] = progress
+                self._emit('plugin', 'printer.job', actions[event], 'observed', metadata)
+
+    def on_print_progress(self, storage, path, progress):
+        if (self._flags.get('state') and isinstance(path, str)
+                and type(progress) is int and 0 <= progress <= 100):
+            self._emit('plugin', 'printer.job', 'progress', 'observed',
+                       {'filename': path.rsplit('/', 1)[-1][:120], 'progress': progress})
 
     def gcode_sent(self, comm, phase, cmd, cmd_type, gcode, *args, **kwargs):
         if self._flags.get('gcode'):

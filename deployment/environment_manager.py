@@ -114,7 +114,12 @@ class OctoPrintEnvironment:
             specific = resolve_octoprint_settings(config.get('octoprint_settings', {}))
             settings['plugins']['virtual_printer'].update(specific['virtual_printer'])
             settings['appearance']={**specific['appearance'], 'name':profile['name']}
-            settings['server'].update(maxSize=common['request_max_bytes'],uploads={'maxSize':common['upload_max_bytes']})
+            # Keep an explicit non-default common limit authoritative for callers.
+            native_upload_limit = specific.get('uploads', {}).get('maxSize', common['upload_max_bytes'])
+            if common['upload_max_bytes'] != 1048576:
+                native_upload_limit = common['upload_max_bytes']
+            settings['server'].update(maxSize=common['request_max_bytes'],
+                                      uploads={'maxSize': native_upload_limit})
             settings['temperature']={'profiles':[{'name':'HoneyPrint Preheat','extruder':common['preheat_hotend_c'],
                 'bed':common['preheat_bed_c'] if profile['heated_bed'] else 0}]}
             source_dir = os.environ.get('_HONEYPRINT_OCTOPRINT_SOURCE_DIR')

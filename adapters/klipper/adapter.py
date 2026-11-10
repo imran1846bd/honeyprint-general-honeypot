@@ -116,9 +116,10 @@ class KlipperAdapter(PlatformAdapter):
         self.server_thread.start()
         def poll():
             previous = None
+            previous_job = None
             while not self.stopped.is_set():
                 try:
-                    state = instance.request('/printer/objects/query?toolhead&extruder&heater_bed&mcu')['status']
+                    state = instance.request('/printer/objects/query?toolhead&extruder&heater_bed&mcu&print_stats&virtual_sdcard')['status']
                     metadata = {'position': state['toolhead']['position'],
                                 'temperature': state['extruder']['temperature'],
                                 'target': state['extruder']['target'],
@@ -130,6 +131,26 @@ class KlipperAdapter(PlatformAdapter):
                         if accepted is False:
                             raise AdapterError('Klipper telemetry was rejected')
                         previous = metadata
+                    job = state['print_stats']
+                    name = job.get('filename')
+                    progress = state.get('virtual_sdcard', {}).get('progress')
+                    job_state = job['state']
+                    job_metadata = {'filename': name.rsplit('/', 1)[-1][:120] if isinstance(name, str) else None,
+                                    'state': job_state,
+                                    'progress': round(progress * 100, 2) if type(progress) in (int, float)
+                                    and math.isfinite(progress) else None,
+                                    'position': state['toolhead']['position'],
+                                    'temperature': state['extruder']['temperature'],
+                                    'bed_temperature': state.get('heater_bed', {}).get('temperature')}
+                    active = job_state in ('printing', 'paused')
+                    if job_metadata != previous_job and (active or previous_job and previous_job['state'] in ('printing', 'paused')):
+                        accepted = sink({'source': 'klipper', 'event_type': 'printer.job',
+                                         'action': 'progress' if active else job_state,
+                                         'outcome': 'observed', 'simulation': True,
+                                         'metadata': job_metadata})
+                        if accepted is False:
+                            raise AdapterError('Klipper job telemetry was rejected')
+                    previous_job = job_metadata
                 except Exception:
                     self.observer_error = True
                     return

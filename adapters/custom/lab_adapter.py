@@ -96,13 +96,16 @@ class LabHandle:
                                     self.simulator.command(command)
                                     distance = math.dist(origin.values(), self.simulator.motion.target.values())
                                     started = True
+                                    self.emit('printer.command', 'execute', 'accepted',
+                                              {'filename': name, 'line': index, 'gcode': command})
                                 self.simulator.step(0.1)
                                 remaining = math.dist(self.simulator.motion.position.values(),
                                                       self.simulator.motion.target.values())
                                 fraction = 1.0 - remaining / distance if distance else 1.0
                                 self.job_progress = ((index - 1) + fraction) * 100.0 / len(commands)
-                                self.emit('printer.state', 'progress', 'observed',
+                                self.emit('printer.job', 'progress', 'observed',
                                           {'filename': name, 'progress': self.job_progress,
+                                           'state': self.job_state,
                                            'position': dict(self.simulator.motion.position),
                                            'temperature': self.simulator.hotend.temperature,
                                            'bed_temperature': self.simulator.bed.temperature})
@@ -112,11 +115,16 @@ class LabHandle:
                 with self.lock:
                     if generation != self.job_generation or self.job_state == 'cancelled': return
                     self.job_state = 'complete'
+                    self.emit('printer.job', 'complete', 'observed',
+                              {'filename': name, 'progress': self.job_progress,
+                               'position': dict(self.simulator.motion.position)})
                     self.emit('manufacturing.stage', 'build_execution', 'completed', {'filename': name})
             except (ValueError, OSError, IndexError):
                 with self.lock:
                     if generation != self.job_generation or self.job_state == 'cancelled': return
                     self.job_state = 'error'
+                    self.emit('printer.job', 'failed', 'observed',
+                              {'filename': name, 'progress': self.job_progress})
                     self.emit('manufacturing.stage', 'build_execution', 'failed', {'filename': name})
 
         self.job_worker = threading.Thread(target=work, daemon=True)
