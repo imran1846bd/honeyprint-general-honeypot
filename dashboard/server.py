@@ -1,10 +1,14 @@
-"""Loopback-only, read-only evidence dashboard and bounded JSON query API."""
+"""Loopback evidence dashboard with bounded reads, CSV export and log clearing."""
 
 import argparse
+from contextlib import closing
+import csv
 from html import escape
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from io import StringIO
 import json
 from pathlib import Path
+import secrets
 import sqlite3
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -25,6 +29,10 @@ _SCRIPT = '''(() => {
   const eventsBody = document.getElementById('events-body');
   const findingsBody = document.getElementById('findings-body');
   const status = document.getElementById('live-status');
+  const clearForm = document.getElementById('clear-logs');
+  if (clearForm) clearForm.addEventListener('submit', event => {
+    if (!window.confirm('Delete captured logs and analysis findings? This cannot be undone.')) event.preventDefault();
+  });
   const params = new URLSearchParams(location.search);
   const query = new URLSearchParams();
   for (const key of ['instance', 'type']) if (params.has(key)) query.set(key, params.get(key));
@@ -70,7 +78,7 @@ _SCRIPT = '''(() => {
       status.textContent = 'Update unavailable · retrying';
     } finally { busy = false; }
   }
-  setInterval(refresh, 3000);
+  if (!params.has('before')) setInterval(refresh, 3000);
 })();'''
 
 
@@ -89,17 +97,24 @@ def read_findings(path, *, instance_id=None, limit=100, timeout=5):
     finally: connection.close()
 
 
-def render_page(rows, findings, *, instance_id='', event_type='', cursor=0, page_size=100):
+def render_page(rows, findings, *, instance_id='', event_type='', cursor=0, page_size=100, action_token=None):
     def text(value): return escape(str(value), quote=True)
     body = [f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HoneyPrint Evidence</title><style>{_STYLE}</style></head><body><main>',
             '<h1>HoneyPrint Interactions</h1><p class="sub">New access and control activity appears here. Background health checks are hidden.</p>',
-            '<span class="tag">Read only</span><span class="tag">Local SQLite evidence</span>',
+            '<span class="tag">Local SQLite evidence</span>',
             '<span class="tag" id="live-status">'+('Live · updates every 3 seconds' if cursor == 0 else 'Older events · static page')+'</span>',
             '<form method="get"><label>Instance<input name="instance" value="'+text(instance_id)+'" placeholder="All instances"></label>',
             '<label>Event type<input name="type" value="'+text(event_type)+'" placeholder="All event types"></label>',
             '<button type="submit">Search</button></form>',
-            f'<h2>Interactions</h2><p class="sub">Showing {len(rows)} most recent interactions'+(f' before sequence {cursor}' if cursor else '')+'.</p>',
-            '<div class="table-wrap"><table><thead><tr><th>Sequence</th><th>UTC time</th><th>Instance</th><th>Type</th><th>Action</th><th>Outcome</th><th>Details</th></tr></thead><tbody id="events-body">']
+            '<p><a href="/api/logs/download">Download all logs (CSV)</a></p>']
+    if action_token is not None:
+        body.append('<form id="clear-logs" method="post" action="/api/logs/clear">'
+                    '<input type="hidden" name="token" value="'+text(action_token)+'">'
+                    '<button type="submit">Clear captured logs</button>'
+                    '<span class="sub">Deletes captured events and findings; lifecycle markers remain.</span></form>')
+    body.extend([f'<h2>Interactions</h2><p class="sub">Showing {len(rows)} most recent interactions'+
+                 (f' before sequence {cursor}' if cursor else '')+'.</p>',
+                 '<div class="table-wrap"><table><thead><tr><th>Sequence</th><th>UTC time</th><th>Instance</th><th>Type</th><th>Action</th><th>Outcome</th><th>Details</th></tr></thead><tbody id="events-body">'])
     for row in rows:
         e = row['event']
         details = text(json.dumps(e.get('metadata', {}), indent=2, ensure_ascii=False))
@@ -114,8 +129,21 @@ def render_page(rows, findings, *, instance_id='', event_type='', cursor=0, page
     for row in findings:
         f = row['finding']
         body.append('<tr>'+''.join('<td>'+text(f[k])+'</td>' for k in ('instance_id','severity','rule_id','message'))+'</tr>')
-    body.append('</tbody></table></div></main>'+(('<script src="/dashboard.js" defer></script>') if cursor == 0 else '')+'</body></html>')
+    body.append('</tbody></table></div>')
+    body.append('</main><script src="/dashboard.js" defer></script></body></html>')
     return ''.join(body)
+
+
+def clear_logs(database, alerts=None, *, timeout=5):
+    """Remove captured evidence while preserving lifecycle readiness markers."""
+    with closing(sqlite3.connect(database, timeout=timeout)) as connection:
+        if alerts is not None:
+            connection.execute('ATTACH DATABASE ? AS analysis', (str(alerts),))
+        with connection:
+            if alerts is not None:
+                connection.execute('DELETE FROM analysis.findings')
+            cursor = connection.execute("DELETE FROM events WHERE json_extract(payload, '$.event_type') != 'framework.lifecycle'")
+            return cursor.rowcount
 
 
 def create_server(database: Path, *, alerts: Path | None = None, port=8090, page_size=100, request_timeout=2, sqlite_timeout=5):
@@ -124,6 +152,7 @@ def create_server(database: Path, *, alerts: Path | None = None, port=8090, page
                       'sqlite_busy_timeout_seconds': sqlite_timeout})
     database = Path(database).resolve(strict=True)
     alerts = Path(alerts).resolve(strict=True) if alerts else None
+    action_token = secrets.token_urlsafe(32)
     class Handler(BaseHTTPRequestHandler):
         def setup(self): super().setup(); self.connection.settimeout(request_timeout)
         def log_message(self, *args): pass
@@ -137,6 +166,29 @@ def create_server(database: Path, *, alerts: Path | None = None, port=8090, page
         def do_GET(self):
             try:
                 route = urlsplit(self.path)
+                if route.path == '/api/logs/download':
+                    if route.query: raise ValueError()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/csv; charset=utf-8')
+                    self.send_header('Content-Disposition', 'attachment; filename="honeyprint-evidence.csv"')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True, timeout=sqlite_timeout)) as connection:
+                        writer_buffer = StringIO()
+                        writer = csv.writer(writer_buffer)
+                        for values in [('sequence','event_id','timestamp','instance_id','platform','source',
+                                        'event_type','action','outcome','simulation','metadata_json')]:
+                            writer.writerow(values)
+                        self.wfile.write(writer_buffer.getvalue().encode('utf-8'))
+                        for sequence, payload in connection.execute('SELECT sequence,payload FROM events ORDER BY sequence'):
+                            event = json.loads(payload)
+                            writer_buffer.seek(0); writer_buffer.truncate(0)
+                            writer.writerow([sequence,*[event.get(key) for key in ('event_id','timestamp','instance_id',
+                                'platform','source','event_type','action','outcome','simulation')],
+                                json.dumps(event.get('metadata', {}), ensure_ascii=False, separators=(',', ':'))])
+                            self.wfile.write(writer_buffer.getvalue().encode('utf-8'))
+                    return
                 if route.path == '/health':
                     with EvidenceReader(database, timeout=sqlite_timeout) as reader:
                         reader.read_events(limit=1)
@@ -166,10 +218,26 @@ def create_server(database: Path, *, alerts: Path | None = None, port=8090, page
                 elif route.path == '/api/alerts': self.respond(200, findings)
                 elif route.path == '/api/live': self.respond(200, {'events': rows, 'findings': findings})
                 else: self.respond(200, render_page(rows, findings, instance_id=instance,
-                                                    event_type=kind, cursor=before, page_size=page_size), 'text/html; charset=utf-8')
+                                                    event_type=kind, cursor=before, page_size=page_size,
+                                                    action_token=action_token), 'text/html; charset=utf-8')
             except (ValueError, OverflowError): self.respond(400, {'error': 'invalid query or evidence'})
             except (OSError, sqlite3.Error): self.respond(503, {'error': 'evidence unavailable'})
-        def do_POST(self): self.respond(405, {'error': 'dashboard is read only'})
+        def do_POST(self):
+            if self.path != '/api/logs/clear':
+                self.respond(405, {'error': 'unsupported dashboard action'}); return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if (not 1 <= length <= 512 or self.headers.get('Content-Type') != 'application/x-www-form-urlencoded'
+                        or self.headers.get('Origin') not in (None, f'http://127.0.0.1:{self.server.server_port}')):
+                    raise ValueError()
+                form = parse_qs(self.rfile.read(length).decode('ascii'), strict_parsing=True)
+                if set(form) != {'token'} or len(form['token']) != 1 or not secrets.compare_digest(form['token'][0], action_token):
+                    raise ValueError()
+                clear_logs(database, alerts, timeout=sqlite_timeout)
+                self.send_response(303); self.send_header('Location', '/')
+                self.send_header('Content-Length', '0'); self.end_headers()
+            except (ValueError, UnicodeError): self.respond(403, {'error': 'clear request rejected'})
+            except (OSError, sqlite3.Error): self.respond(503, {'error': 'log storage unavailable'})
     return HTTPServer(('127.0.0.1', port), Handler)
 
 
