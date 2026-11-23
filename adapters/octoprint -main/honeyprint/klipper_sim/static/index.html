@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>voron24 | Mainsail</title>
+  <style>
+    :root{color-scheme:dark;--bg:#101418;--panel:#1a2026;--line:#303841;--text:#e7edf2;--muted:#94a0aa;--green:#51b56d;--red:#d65c5c;--blue:#4d9de0}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}
+    header{height:54px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:#151a1f}
+    h1{font-size:17px;margin:0}h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}
+    main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;padding:12px;max-width:1450px;margin:auto}
+    .stack{display:grid;gap:12px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}.body{padding:14px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.metric{border:1px solid var(--line);padding:12px;border-radius:4px}.label{color:var(--muted);font-size:12px}.value{font-size:20px;margin-top:5px}.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin:8px 0}
+    button,input{background:#242c33;color:var(--text);border:1px solid #3a4650;border-radius:4px;padding:7px 9px;min-width:0}button{cursor:pointer}button:hover{background:#303a43}.danger{background:#713434}.accent{background:#246c3a}.status{display:inline-flex;align-items:center;gap:7px;color:#dff7e5;background:#245432;border:1px solid #4ca967;border-radius:999px;padding:6px 11px;font-weight:700}.status::before{content:'';width:8px;height:8px;border-radius:50%;background:#69db82;box-shadow:0 0 0 3px rgba(105,219,130,.16)}.files button{padding:4px 7px}.upload-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center}.upload-controls button{white-space:nowrap}.console{height:265px;overflow:auto;background:#11161a;padding:10px;font:12px ui-monospace,monospace;white-space:pre-wrap}.console-input{display:flex;gap:7px;padding:8px;border-top:1px solid var(--line)}.console-input input{flex:1}.progress{height:8px;background:#11161a;border-radius:4px;overflow:hidden}.progress span{display:block;height:100%;background:var(--green);width:0}.file{display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}.file-name{flex:1;min-width:0;overflow-wrap:anywhere}.command-value{display:block;max-width:205px;text-align:right;overflow-wrap:anywhere;font:12px ui-monospace,monospace;color:#c6d3dc}
+    @media(max-width:850px){main{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header><h1>voron24</h1><span id="state" class="status">Klipper ready</span></header>
+  <main>
+    <section class="stack">
+      <div class="panel"><h2>Dashboard</h2><div class="body grid">
+        <div class="metric"><div class="label">Extruder</div><div id="extruder" class="value">-- / -- C</div></div>
+        <div class="metric"><div class="label">Heater Bed</div><div id="bed" class="value">-- / -- C</div></div>
+        <div class="metric"><div class="label">Toolhead Position</div><div id="position" class="value">X0 Y0 Z0</div></div>
+      </div></div>
+      <div class="panel"><h2>Console</h2><div id="console" class="console">Moonraker connected.
+</div><form id="console-form" class="console-input"><input id="command" placeholder="Enter G-code or Klipper command"><button>Send</button></form></div>
+    </section>
+    <aside class="stack">
+      <div class="panel"><h2>Print Status</h2><div class="body">
+        <div class="row"><span class="label">File</span><span id="filename">-</span></div>
+        <div class="row"><span class="label">State</span><span id="print-state">standby</span></div>
+        <div class="row"><span class="label">Current Command</span><span id="current-command" class="command-value">-</span></div>
+        <div class="progress"><span id="progress-bar"></span></div>
+        <div class="row"><span class="label">Progress</span><span id="progress">0.0%</span></div>
+        <div class="row"><button onclick="printAction('pause')">Pause</button><button onclick="printAction('resume')">Resume</button><button class="danger" onclick="printAction('cancel')">Cancel</button></div>
+      </div></div>
+      <div class="panel"><h2>G-code Files</h2><div class="body files">
+        <div class="upload-controls"><input id="upload" type="file" accept=".gcode,.gco,.g,.bgcode"><button type="button" onclick="upload()">Upload</button></div>
+        <div id="files"></div>
+      </div></div>
+      <div class="panel"><h2>Emergency</h2><div class="body"><button class="danger" onclick="emergency()">Emergency Stop</button></div></div>
+    </aside>
+  </main>
+  <script>
+    const q = id => document.getElementById(id);
+    const log = text => { q('console').textContent += text + '\n'; q('console').scrollTop = q('console').scrollHeight; };
+    async function json(url, options) { const r = await fetch(url, options); return r.json(); }
+    async function refresh() {
+      const data = await json('/printer/objects/query?extruder&heater_bed&toolhead&print_stats&display_status');
+      const s = data.result.status, e = s.extruder, b = s.heater_bed, p = s.toolhead.position, stats = s.print_stats, pct = (s.display_status.progress * 100);
+      q('extruder').textContent = `${e.temperature.toFixed(1)} / ${e.target.toFixed(1)} C`;
+      q('bed').textContent = `${b.temperature.toFixed(1)} / ${b.target.toFixed(1)} C`;
+      q('position').textContent = `X${p[0].toFixed(1)} Y${p[1].toFixed(1)} Z${p[2].toFixed(1)}`;
+      q('filename').textContent = stats.filename || '-'; q('print-state').textContent = stats.state;
+      q('current-command').textContent = stats.current_command || '-';
+      q('progress').textContent = `${pct.toFixed(1)}%`; q('progress-bar').style.width = `${pct}%`;
+    }
+    async function files() {
+      const data = await json('/server/files/list'), list = q('files'); list.textContent = '';
+      data.result.forEach(f => { const el = document.createElement('div'); el.className = 'file';
+        const name = document.createElement('span'); name.className = 'file-name'; name.textContent = f.path;
+        const start = document.createElement('button'); start.textContent = 'Print'; start.onclick = () => printAction('start', f.path);
+        el.append(name, start); list.append(el); });
+    }
+    async function printAction(action, filename) { await json(`/printer/print/${action}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename})}); refresh(); }
+    async function emergency() { await json('/printer/emergency_stop', {method:'POST'}); log('Emergency stop requested'); refresh(); }
+    async function upload() { const input=q('upload'), file=input.files[0]; if(!file){log('Select a G-code or BGCODE file first');return;} const body=new FormData(); body.append('file',file,file.name); try { const r=await fetch('/server/files/upload',{method:'POST',body}); if(!r.ok){const data=await r.json().catch(()=>({}));log(data.error?.message || 'Upload rejected: G-code or BGCODE files only');return;} log(`Uploaded: ${file.name}`); input.value=''; await files(); } catch(e) { log(`Upload failed: ${e.message}`); } }
+    q('console-form').onsubmit = async e => { e.preventDefault(); const script=q('command').value.trim(); if(!script)return; log('> '+script); await json('/printer/gcode/script',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script})}); q('command').value=''; refresh(); };
+    setInterval(refresh,1000); refresh(); files();
+  </script>
+</body>
+</html>

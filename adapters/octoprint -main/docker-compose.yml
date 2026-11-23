@@ -1,0 +1,142 @@
+###############################################################################
+# HoneyPrint - Additive Manufacturing Honeypot
+# Docker Compose Deployment
+#
+# Architecture mirrors HoneySat's containerized deployment (Fig. 6):
+# - Container 1: OctoPrint Web Interface (Ground Software)
+# - Container 2: Printer Simulator + Firmware (Space Segment)
+# - Container 3: Telnet Server (Exposed Protocol)
+# - Container 4: MongoDB (Logging Repository)
+# - Container 5: (Optional) VNC Desktop (GSS Desktop)
+#
+# For simplicity, containers 1-3 are combined into a single Python service.
+# This can be split for production deployments with stricter isolation.
+###############################################################################
+
+services:
+  # === Main HoneyPrint Service ===
+  # Combines Ground Segment (Web/Telnet) + Space Segment (Simulator/Firmware)
+  honeyprint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: honeyprint_core
+    restart: unless-stopped
+    ports:
+      - "${HONEYPRINT_WEB_PORT:-80}:80"         # OctoPrint Web Interface
+      - "${HONEYPRINT_TELNET_PORT:-23}:23"       # Telnet (Direct Serial)
+    environment:
+      - HONEYPRINT_MONGODB_URI=mongodb://honeyprint_mongo:27017
+      - HONEYPRINT_PRINTER_PROFILE=${HONEYPRINT_PROFILE:-ender3_v2}
+      - HONEYPRINT_PRINTER_NAME=${HONEYPRINT_NAME:-Ender-3 V2}
+      - HONEYPRINT_WEB_PORT=80
+      - HONEYPRINT_TELNET_PORT=23
+      - HONEYPRINT_WEB_USERNAME=${HONEYPRINT_USER:-admin}
+      - HONEYPRINT_WEB_PASSWORD=${HONEYPRINT_PASS:-admin}
+      - HONEYPRINT_API_KEY=${HONEYPRINT_API_KEY:-A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6}
+      - HONEYPRINT_ANALYST_KEY=${HONEYPRINT_ANALYST_KEY:-change-me}
+      - HONEYPRINT_FAKE_PRINT=${HONEYPRINT_FAKE_PRINT:-false}
+      - HONEYPRINT_STORAGE_DIR=/app/data/octo
+    volumes:
+      - honeyprint_data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      - mongo
+    networks:
+      - honeyprint_net
+    # Security: Read-only filesystem where possible
+    read_only: false
+    tmpfs:
+      - /tmp
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # === HoneyPrint_Klipper Variant ===
+  # Moonraker-compatible API and a Mainsail-style browser interface.
+  honeyprint_klipper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: honeyprint_klipper
+    restart: unless-stopped
+    command: ["python", "-m", "honeyprint.klipper_main"]
+    ports:
+      - "${HONEYPRINT_KLIPPER_PORT:-7125}:7125"
+    environment:
+      - HONEYPRINT_MONGODB_URI=mongodb://honeyprint_mongo:27017
+      - HONEYPRINT_MONGODB_DB=honeyprint_klipper_logs
+      - HONEYPRINT_PRINTER_PROFILE=voron_2_4
+      - HONEYPRINT_PRINTER_NAME=${HONEYPRINT_KLIPPER_NAME:-VORON 2.4r2}
+      - HONEYPRINT_WEB_PORT=7125
+      - HONEYPRINT_ANALYST_KEY=${HONEYPRINT_ANALYST_KEY:-change-me}
+      - HONEYPRINT_STORAGE_DIR=/app/data/klipper
+    volumes:
+      - honeyprint_klipper_data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      - mongo
+    networks:
+      - honeyprint_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7125/server/info')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # === MongoDB Logging Repository ===
+  # Stores all interaction data (analogous to HoneySat's MongoDB)
+  mongo:
+    image: mongo:7
+    container_name: honeyprint_mongo
+    restart: unless-stopped
+    # NOT exposed externally - only accessible within Docker network
+    # This follows HoneySat's security model (Fig. 6)
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - honeyprint_net
+    environment:
+      # No auth by default (internal only) - can be hardened
+      - MONGO_INITDB_DATABASE=honeyprint_logs
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  # === (Optional) VNC Desktop ===
+  # Provides a desktop environment with slicer software
+  # Analogous to HoneySat's VNC container with Gpredict + MCS
+  # Uncomment to enable
+  # vnc:
+  #   image: consol/rocky-xfce-vnc:latest
+  #   container_name: honeyprint_vnc
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${HONEYPRINT_VNC_PORT:-5901}:5901"
+  #   environment:
+  #     - VNC_PW=octoprint
+  #     - VNC_RESOLUTION=1280x720
+  #   networks:
+  #     - honeyprint_net
+
+volumes:
+  honeyprint_data:
+  honeyprint_klipper_data:
+  mongo_data:
+
+networks:
+  honeyprint_net:
+    driver: bridge

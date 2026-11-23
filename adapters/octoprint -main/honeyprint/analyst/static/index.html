@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HoneyPrint Analyst Console</title>
+  <style>
+    :root{color-scheme:dark;--bg:#11161a;--panel:#1b2329;--line:#33404a;--text:#e6edf3;--muted:#94a3ad;--red:#df6464;--amber:#dda84b;--green:#63bd7b}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}h1{font-size:18px;margin:0}main{padding:14px;display:grid;gap:12px;max-width:1500px;margin:auto}.counts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px}.card{padding:14px}.card strong{display:block;font-size:26px;margin-top:4px}.muted{color:var(--muted)}.tables{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel h2{font-size:14px;padding:11px 13px;margin:0;border-bottom:1px solid var(--line)}.scroll{max-height:360px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);position:sticky;top:0;background:var(--panel)}.high,.critical{color:var(--red)}.medium{color:var(--amber)}@media(max-width:850px){.counts,.tables{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header><h1>HoneyPrint Analyst Console</h1><span id="variant" class="muted"></span></header>
+  <main>
+    <section class="counts">
+      <div class="card"><span class="muted">Events</span><strong id="events">0</strong></div>
+      <div class="card"><span class="muted">Alerts</span><strong id="alerts">0</strong></div>
+      <div class="card"><span class="muted">Print Events</span><strong id="sessions">0</strong></div>
+      <div class="card"><span class="muted">Upload History</span><strong id="uploads">0</strong></div>
+    </section>
+    <section class="tables">
+      <div class="panel"><h2>Suspicious Command Alerts</h2><div class="scroll"><table><thead><tr><th>Severity</th><th>Reason</th><th>Command</th></tr></thead><tbody id="alert-table"></tbody></table></div></div>
+      <div class="panel"><h2>Immutable Upload History</h2><div class="scroll"><table><thead><tr><th>Stored File</th><th>Size</th><th>SHA-256</th></tr></thead><tbody id="upload-table"></tbody></table></div></div>
+      <div class="panel"><h2>Print Session Events</h2><div class="scroll"><table><thead><tr><th>Event</th><th>File</th><th>Line</th></tr></thead><tbody id="print-table"></tbody></table></div></div>
+      <div class="panel"><h2>Recent Events</h2><div class="scroll"><table><thead><tr><th>Event</th><th>Details</th></tr></thead><tbody id="event-table"></tbody></table></div></div>
+    </section>
+  </main>
+  <script>
+    const q=id=>document.getElementById(id), esc=v=>String(v??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const row=cells=>'<tr>'+cells.map(x=>`<td>${x}</td>`).join('')+'</tr>';
+    const analystKey=localStorage.getItem('honeyprintAnalystKey')||prompt('Analyst key')||'';localStorage.setItem('honeyprintAnalystKey',analystKey);
+    async function refresh(){const r=await fetch('/analyst/api/summary',{headers:{'X-Analyst-Key':analystKey}});if(!r.ok){q('variant').textContent='Unauthorized';return;}const d=await r.json();q('variant').textContent=d.variant;
+      q('events').textContent=d.counts.events;q('alerts').textContent=d.counts.alerts;q('sessions').textContent=d.counts.print_sessions;q('uploads').textContent=d.counts.uploads;
+      q('alert-table').innerHTML=d.alerts.map(a=>row([`<span class="${esc(a.severity)}">${esc(a.severity)}</span>`,esc(a.reason),esc(a.command)])).join('');
+      q('upload-table').innerHTML=d.uploads.map(u=>row([esc(u.stored_filename),esc(u.size),`<span title="${esc(u.content_hash)}">${esc((u.content_hash||'').slice(0,12))}</span>`])).join('');
+      q('print-table').innerHTML=d.print_sessions.map(e=>row([esc(e.event_type),esc(e.filename),esc(e.line||'')])).join('');
+      q('event-table').innerHTML=d.events.map(e=>row([esc(e.event_type),esc(e.command||e.filename||'')])).join('');
+    }refresh();setInterval(refresh,2000);
+  </script>
+</body>
+</html>

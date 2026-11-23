@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OctoPrint - Login</title>
+    <link rel="stylesheet" href="/static/css/octoprint.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #2b2b2b;
+        }
+        .login-box {
+            background: #3c3c3c;
+            border-radius: 8px;
+            padding: 40px;
+            width: 360px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .login-box h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #e8e8e8;
+            font-size: 24px;
+        }
+        .login-box .logo {
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <div class="logo">🐙</div>
+        <h1>OctoPrint</h1>
+        <form id="login-form" onsubmit="submitLogin(event)">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="user" required autofocus>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="pass" required>
+            </div>
+            <div id="error-msg" class="error-msg" style="display:none;"></div>
+            <button type="submit" class="btn btn-primary btn-block">Login</button>
+        </form>
+        <p style="text-align:center; margin-top:20px; color:#888; font-size:12px;">
+            This computer system is for authorized use only.
+        </p>
+    </div>
+    <script>
+        async function submitLogin(e) {
+            e.preventDefault();
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            try {
+                const resp = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user: user, pass: pass})
+                });
+                if (resp.ok) {
+                    window.location.reload();
+                } else {
+                    document.getElementById('error-msg').style.display = 'block';
+                    document.getElementById('error-msg').textContent = 'Invalid username or password.';
+                }
+            } catch(err) {
+                document.getElementById('error-msg').style.display = 'block';
+                document.getElementById('error-msg').textContent = 'Connection error.';
+            }
+        }
+    </script>
+</body>
+</html>

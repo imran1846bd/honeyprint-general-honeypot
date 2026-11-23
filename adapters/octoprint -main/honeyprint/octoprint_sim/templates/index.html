@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OctoPrint</title>
+    <link rel="stylesheet" href="/static/css/octoprint.css?v=4">
+    <link rel="icon" type="image/png" href="/static/img/tentacle-20x20.png">
+</head>
+<body>
+    <!-- Toast notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <span class="navbar-logo">🐙</span>
+            <span class="navbar-title">OctoPrint</span>
+            <span class="navbar-version">1.9.3</span>
+        </div>
+        <div class="navbar-status">
+            <span id="printer-state" class="state-badge state-operational">Operational</span>
+        </div>
+        <div class="navbar-actions">
+            <span id="user-display" class="navbar-user"></span>
+            <button id="btn-logout" class="btn btn-sm" onclick="doLogout()" style="display:none;">Logout</button>
+        </div>
+    </nav>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <h2>Login</h2>
+            <p>Please log in to access OctoPrint.</p>
+            <form id="login-form" onsubmit="doLogin(event)">
+                <div class="form-group">
+                    <label for="login-user">Username</label>
+                    <input type="text" id="login-user" name="user" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-pass">Password</label>
+                    <input type="password" id="login-pass" name="pass" required>
+                </div>
+                <div id="login-error" class="error-msg" style="display:none;"></div>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="container">
+        <!-- Tab Navigation -->
+        <div class="tab-bar">
+            <button class="tab active" data-tab="temperature">Temperature</button>
+            <button class="tab" data-tab="control">Control</button>
+            <button class="tab" data-tab="gcode">GCode Viewer</button>
+            <button class="tab" data-tab="terminal">Terminal</button>
+            <button class="tab" data-tab="timelapse">Timelapse</button>
+        </div>
+
+        <div class="content-wrapper">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Connection Panel -->
+                <div class="panel" id="connection-panel">
+                    <h3>Connection</h3>
+                    <div class="panel-body">
+                        <div class="form-row">
+                            <label>Serial Port</label>
+                            <select id="serial-port">
+                                <option>/dev/ttyUSB0</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Baudrate</label>
+                            <select id="baudrate">
+                                <option>115200</option>
+                                <option>250000</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Printer Profile</label>
+                            <select id="printer-profile">
+                                <option id="profile-name">Default</option>
+                            </select>
+                        </div>
+                        <button id="btn-connect" class="btn btn-primary btn-block" onclick="toggleConnection()">
+                            Disconnect
+                        </button>
+                    </div>
+                </div>
+
+                <!-- State Panel -->
+                <div class="panel" id="state-panel">
+                    <h3>State</h3>
+                    <div class="panel-body">
+                        <div class="state-row">
+                            <span class="label">State:</span>
+                            <span id="state-text" class="value">Operational</span>
+                        </div>
+                        <div id="job-info" style="display:none;">
+                            <div class="state-row">
+                                <span class="label">File:</span>
+                                <span id="job-file" class="value">-</span>
+                            </div>
+                            <div class="state-row">
+                                <span class="label">Progress:</span>
+                                <span id="job-progress-text" class="value">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div id="job-progress-bar" class="progress-fill" style="width:0%"></div>
+                            </div>
+                            <div class="state-row">
+                                <span class="label">G-code Line:</span>
+                                <span id="job-line" class="value">-</span>
+                            </div>
+                            <div class="state-row">
+                                <span class="label">Command:</span>
+                                <span id="job-command" class="value">-</span>
+                            </div>
+                            <div class="state-row">
+                                <span class="label">Print Time:</span>
+                                <span id="job-time" class="value">-</span>
+                            </div>
+                            <div class="state-row">
+                                <span class="label">Remaining:</span>
+                                <span id="job-remaining" class="value">-</span>
+                            </div>
+                            <div class="job-controls" style="display:flex; gap:5px; margin-top:10px;">
+                                <button id="btn-pause" class="btn btn-sm" onclick="pauseJob()" style="flex:1;">Pause</button>
+                                <button id="btn-cancel" class="btn btn-sm btn-danger" onclick="cancelJob()" style="flex:1;">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Files Panel -->
+                <div class="panel" id="files-panel">
+                    <h3>Files
+                        <button class="btn btn-sm btn-right" onclick="refreshFiles()">↻</button>
+                    </h3>
+                    <div class="panel-body">
+                        <div class="upload-area" id="upload-area">
+                            <button class="btn btn-block" onclick="document.getElementById('file-upload').click()">
+                                📁 Upload File
+                            </button>
+                        </div>
+                        <div id="file-list" class="file-list">
+                            <!-- Files populated by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Webcam Panel -->
+                <div class="panel" id="webcam-panel">
+                    <h3>Webcam</h3>
+                    <div class="panel-body">
+                        <div class="webcam-placeholder">
+                            <div class="webcam-offline">
+                                <span>📷</span>
+                                <p>Webcam stream</p>
+                                <p class="webcam-note">No signal</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Tab Content -->
+            <main class="main-panel">
+                <!-- Temperature Tab -->
+                <div id="tab-temperature" class="tab-content active">
+                    <h3>Temperature</h3>
+                    <div class="temp-controls">
+                        <div class="temp-group">
+                            <h4>🔥 Hotend (Tool 0)</h4>
+                            <div class="temp-display">
+                                <span class="temp-actual" id="hotend-actual">22.0°C</span>
+                                <span class="temp-separator">/</span>
+                                <span class="temp-target" id="hotend-target">0.0°C</span>
+                            </div>
+                            <div class="temp-input-row">
+                                <input type="number" id="hotend-set" placeholder="Target"
+                                       min="0" max="300" value="0">
+                                <button class="btn btn-sm" onclick="setTemp('tool0')">Set</button>
+                                <button class="btn btn-sm btn-danger" onclick="offTemp('tool0')">Off</button>
+                            </div>
+                            <div class="temp-presets">
+                                <button class="btn btn-xs" onclick="presetTemp('tool0', 210)">PLA</button>
+                                <button class="btn btn-xs" onclick="presetTemp('tool0', 240)">ABS</button>
+                                <button class="btn btn-xs" onclick="presetTemp('tool0', 230)">PETG</button>
+                            </div>
+                        </div>
+                        <div class="temp-group">
+                            <h4>🛏️ Bed</h4>
+                            <div class="temp-display">
+                                <span class="temp-actual" id="bed-actual">22.0°C</span>
+                                <span class="temp-separator">/</span>
+                                <span class="temp-target" id="bed-target">0.0°C</span>
+                            </div>
+                            <div class="temp-input-row">
+                                <input type="number" id="bed-set" placeholder="Target"
+                                       min="0" max="150" value="0">
+                                <button class="btn btn-sm" onclick="setTemp('bed')">Set</button>
+                                <button class="btn btn-sm btn-danger" onclick="offTemp('bed')">Off</button>
+                            </div>
+                            <div class="temp-presets">
+                                <button class="btn btn-xs" onclick="presetTemp('bed', 60)">PLA</button>
+                                <button class="btn btn-xs" onclick="presetTemp('bed', 100)">ABS</button>
+                                <button class="btn btn-xs" onclick="presetTemp('bed', 70)">PETG</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="temp-chart-placeholder">
+                        <canvas id="temp-chart" width="600" height="200"></canvas>
+                    </div>
+                </div>
+
+                <!-- Control Tab -->
+                <div id="tab-control" class="tab-content">
+                    <h3>Control</h3>
+                    <div class="control-grid">
+                        <div class="control-group">
+                            <h4>Movement</h4>
+                            <div class="jog-controls">
+                                <div class="jog-row">
+                                    <button class="btn jog-btn" onclick="jog('Y', 10)">Y+</button>
+                                </div>
+                                <div class="jog-row">
+                                    <button class="btn jog-btn" onclick="jog('X', -10)">X-</button>
+                                    <button class="btn jog-btn jog-home" onclick="homeAxes()">🏠</button>
+                                    <button class="btn jog-btn" onclick="jog('X', 10)">X+</button>
+                                </div>
+                                <div class="jog-row">
+                                    <button class="btn jog-btn" onclick="jog('Y', -10)">Y-</button>
+                                </div>
+                                <div class="jog-row" style="margin-top:10px;">
+                                    <button class="btn jog-btn" onclick="jog('Z', 10)">Z+</button>
+                                    <button class="btn jog-btn" onclick="jog('Z', -10)">Z-</button>
+                                </div>
+                            </div>
+                            <div class="jog-distance">
+                                <label>Distance:</label>
+                                <select id="jog-distance">
+                                    <option value="0.1">0.1mm</option>
+                                    <option value="1">1mm</option>
+                                    <option value="10" selected>10mm</option>
+                                    <option value="100">100mm</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Extruder</h4>
+                            <div class="extrude-controls">
+                                <input type="number" id="extrude-amount" value="5" min="1" max="100">
+                                <span>mm</span>
+                                <button class="btn btn-sm" onclick="extrude(1)">Extrude</button>
+                                <button class="btn btn-sm" onclick="extrude(-1)">Retract</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Fan</h4>
+                            <div class="fan-controls">
+                                <input type="range" id="fan-speed" min="0" max="255" value="0"
+                                       oninput="setFan(this.value)">
+                                <span id="fan-display">Off</span>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Motors & Power</h4>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <button class="btn btn-sm" onclick="runCmd('M17', 'Motors enabled')">Enable Motors</button>
+                                <button class="btn btn-sm" onclick="runCmd('M18', 'Motors disabled')">Disable Motors</button>
+                                <button class="btn btn-sm btn-danger" onclick="emergencyStop()" title="M112 Emergency Stop">⛔ Emergency Stop</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Speed & Flow</h4>
+                            <div class="slider-row">
+                                <label>Print Speed: <span id="speed-display">100%</span></label>
+                                <input type="range" id="speed-slider" min="25" max="200" value="100"
+                                       oninput="setSpeedFactor(this.value)">
+                            </div>
+                            <div class="slider-row">
+                                <label>Flow Rate: <span id="flow-display">100%</span></label>
+                                <input type="range" id="flow-slider" min="50" max="150" value="100"
+                                       oninput="setFlowFactor(this.value)">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Babystep Z</h4>
+                            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                                <button class="btn btn-sm" onclick="babystepZ(-0.025)">Z -0.025</button>
+                                <button class="btn btn-sm" onclick="babystepZ(-0.005)">Z -0.005</button>
+                                <span id="babystep-display" style="color:#4CAF50; min-width:60px; text-align:center;">0.000 mm</span>
+                                <button class="btn btn-sm" onclick="babystepZ(0.005)">Z +0.005</button>
+                                <button class="btn btn-sm" onclick="babystepZ(0.025)">Z +0.025</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Bed & Calibration</h4>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <button class="btn btn-sm" onclick="runCmd('G29', 'Auto bed leveling started')">Auto Bed Level (G29)</button>
+                                <button class="btn btn-sm" onclick="runCmd('G30', 'Probing Z')">Probe Z (G30)</button>
+                                <button class="btn btn-sm" onclick="runCmd('M48', 'Repeatability test')">Probe Repeat (M48)</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>Filament</h4>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <button class="btn btn-sm" onclick="runCmd('M600', 'Filament change')">Change Filament (M600)</button>
+                                <button class="btn btn-sm" onclick="runCmd('M701', 'Loading filament')">Load (M701)</button>
+                                <button class="btn btn-sm" onclick="runCmd('M702', 'Unloading filament')">Unload (M702)</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <h4>EEPROM</h4>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <button class="btn btn-sm" onclick="runCmd('M500', 'Settings saved to EEPROM')">Save (M500)</button>
+                                <button class="btn btn-sm" onclick="runCmd('M501', 'Settings loaded from EEPROM')">Load (M501)</button>
+                                <button class="btn btn-sm" onclick="runCmd('M502', 'Settings reset to defaults')">Reset (M502)</button>
+                                <button class="btn btn-sm" onclick="runCmd('M503', 'Settings reported')">Report (M503)</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Terminal Tab -->
+                <div id="tab-terminal" class="tab-content">
+                    <h3>Terminal</h3>
+                    <div class="terminal-wrapper">
+                        <div id="terminal-output" class="terminal-output"></div>
+                        <div class="terminal-input">
+                            <input type="text" id="terminal-cmd" placeholder="Enter G-code command..."
+                                   onkeydown="if(event.key==='Enter')sendTerminalCmd()">
+                            <button class="btn" onclick="sendTerminalCmd()">Send</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GCode Viewer Tab -->
+                <div id="tab-gcode" class="tab-content">
+                    <div class="gcode-viewer-header">
+                        <h3>GCode Viewer
+                            <span id="gcode-filename" style="font-weight:normal; color:#888; font-size:13px; margin-left:10px;"></span>
+                        </h3>
+                        <div class="gcode-viewer-actions">
+                            <button id="gcode-start-print" class="btn btn-primary"
+                                    onclick="printViewedFile()" style="display:none;">
+                                Start Print
+                            </button>
+                            <button id="gcode-pause-print" class="btn"
+                                    onclick="pauseJob()" style="display:none;">
+                                Pause
+                            </button>
+                            <button id="gcode-stop-print" class="btn btn-danger"
+                                    onclick="cancelJob()" style="display:none;">
+                                Stop
+                            </button>
+                        </div>
+                    </div>
+                    <div id="gcode-empty" class="placeholder-content">
+                        <p>Click a file in the sidebar to view its G-code.</p>
+                        <button class="btn btn-primary"
+                                onclick="document.getElementById('file-upload').click()">
+                            Upload G-code File
+                        </button>
+                    </div>
+                    <div id="gcode-content-wrapper" style="display:none;">
+                        <div class="gcode-stats" id="gcode-stats"></div>
+                        <pre id="gcode-content" class="gcode-content"></pre>
+                    </div>
+                </div>
+
+                <!-- Timelapse Tab -->
+                <div id="tab-timelapse" class="tab-content">
+                    <h3>Timelapse</h3>
+                    <div class="timelapse-section">
+                        <h4>Configuration</h4>
+                        <div class="form-row">
+                            <label>Mode</label>
+                            <select id="timelapse-mode">
+                                <option value="off">Off</option>
+                                <option value="zchange" selected>On Z change</option>
+                                <option value="timed">Timed</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Post-roll (seconds)</label>
+                            <input type="number" value="0" min="0">
+                        </div>
+                        <div class="form-row">
+                            <label>FPS</label>
+                            <input type="number" value="25" min="1" max="60">
+                        </div>
+                    </div>
+                    <div class="timelapse-section">
+                        <h4>Recordings</h4>
+                        <div id="timelapse-list" class="file-list">
+                            <div class="file-item">
+                                <span class="file-name">benchy_2026-04-12.mp4</span>
+                                <span class="file-size">14.2 MB</span>
+                                <div class="file-actions">
+                                    <button class="btn btn-xs">⬇</button>
+                                    <button class="btn btn-xs btn-danger">✕</button>
+                                </div>
+                            </div>
+                            <div class="file-item">
+                                <span class="file-name">phone_stand_2026-04-08.mp4</span>
+                                <span class="file-size">22.7 MB</span>
+                                <div class="file-actions">
+                                    <button class="btn btn-xs">⬇</button>
+                                    <button class="btn btn-xs btn-danger">✕</button>
+                                </div>
+                            </div>
+                            <div class="file-item">
+                                <span class="file-name">calibration_2026-03-30.mp4</span>
+                                <span class="file-size">8.5 MB</span>
+                                <div class="file-actions">
+                                    <button class="btn btn-xs">⬇</button>
+                                    <button class="btn btn-xs btn-danger">✕</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <input type="file" id="file-upload" accept=".gcode,.gco,.g,.bgcode"
+           onchange="uploadFile(this)" style="display:none;">
+
+    <!-- Footer -->
+    <footer class="footer">
+        <span>OctoPrint 1.9.3 &copy; 2024 Gina Häußge &amp; Contributors</span>
+        <span>|</span>
+        <span>This computer system is for authorized use only.</span>
+    </footer>
+
+    <script src="/static/js/octoprint.js?v=4"></script>
+</body>
+</html>

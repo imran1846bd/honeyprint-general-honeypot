@@ -1,0 +1,38 @@
+# HoneyPrint - Additive Manufacturing Honeypot Framework
+# Core dependencies
+
+# Web framework (OctoPrint simulation)
+aiohttp>=3.9.0
+aiohttp-jinja2>=1.6
+aiohttp-session>=2.12.0
+
+# WebSocket support (real-time printer updates)
+# included in aiohttp
+
+# Database (logging repository)
+motor>=3.3.0          # async MongoDB driver
+pymongo>=4.6.0
+
+# Configuration
+pyyaml>=6.0.1
+
+# Telnet server
+asyncio>=3.4.3
+
+# Physics/math
+numpy>=1.26.0
+
+# Networking utilities
+netifaces>=0.11.0
+
+# VNC (optional, for desktop simulation)
+# Uses TigerVNC externally
+
+# Logging
+structlog>=24.1.0
+
+# CLI
+click>=8.1.0
+
+# Rate limiting / security
+aiohttp-cors>=0.7.0

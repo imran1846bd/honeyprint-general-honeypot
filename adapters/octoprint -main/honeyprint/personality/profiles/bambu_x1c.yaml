@@ -1,0 +1,126 @@
+# Bambu Lab X1 Carbon Printer Personality Profile
+# High-speed enclosed CoreXY printer with AMS multi-material support.
+
+printer:
+  name: "Bambu Lab X1 Carbon"
+  manufacturer: "Bambu Lab"
+  model: "X1 Carbon"
+  firmware: "Bambu Firmware"
+  firmware_version: "01.07.00.00"
+  firmware_string: "Bambu Firmware 01.07.00.00"
+  machine_uuid: "00000000-0000-0000-0000-000000000002"
+
+build_volume:
+  x: 256  # mm
+  y: 256  # mm
+  z: 256  # mm
+
+nozzle:
+  diameter: 0.4  # mm (hardened steel, swappable)
+  count: 1
+
+filament:
+  diameter: 1.75  # mm
+  supported_types:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PA (Nylon)
+    - PA-CF
+    - PA-GF
+    - PC
+    - PET-CF
+    - PVA
+    - TPU
+    - PPS
+    - PPS-CF
+
+extruder:
+  num_extruders: 1  # single extruder; AMS feeds filaments to it
+  type: "Direct Drive"
+  max_feedrate: 300  # mm/s - high speed capable
+  max_acceleration: 20000  # mm/s^2
+  steps_per_mm: 415.0
+  notes: "Supports Bambu AMS (Automatic Material System) for up to 16 filaments via 4 AMS units"
+
+temperature:
+  max_temp_hotend: 300
+  max_temp_bed: 110
+  max_temp_chamber: 60    # active chamber heating via bed
+  min_temp_hotend: 170
+  default_temp_hotend: 220
+  default_temp_bed: 65
+
+capabilities:
+  heated_bed: true
+  heated_chamber: true     # enclosed, chamber heats from bed
+  auto_bed_leveling: true
+  filament_sensor: true
+  power_loss_recovery: true
+  sd_card: true            # micro-SD
+  usb_print: false
+  input_shaping: true
+  lidar_first_layer: true
+  camera: true
+  wifi: true
+  ethernet: false
+  ams_support: true
+
+motion:
+  max_feedrate_x: 500  # mm/s - CoreXY high speed
+  max_feedrate_y: 500
+  max_feedrate_z: 20
+  max_feedrate_e: 300
+  max_acceleration_x: 20000  # mm/s^2
+  max_acceleration_y: 20000
+  max_acceleration_z: 500
+  max_acceleration_e: 5000
+  default_acceleration: 10000
+  default_travel_acceleration: 12000
+  homing_feedrate_x: 200
+  homing_feedrate_y: 200
+  homing_feedrate_z: 10
+
+communication:
+  serial_port: "/dev/ttyUSB0"
+  baud_rate: 115200
+  protocol: "mqtt"          # Bambu uses MQTT over network
+  mqtt_port: 8883
+  mqtt_tls: true
+
+# Simulation parameters for realistic thermal behavior
+simulation:
+  hotend:
+    thermal_mass: 3.2          # J/K - compact all-metal hotend
+    heating_power: 65.0        # W - high-power ceramic heater
+    cooling_coeff: 0.05        # W/K - enclosed chamber, less ambient cooling
+    ambient_temp: 25.0
+    pid:
+      kp: 12.50
+      ki: 0.85
+      kd: 60.00
+    noise_amplitude: 0.1       # C - high quality thermistor
+    max_heating_rate: 8.0      # C/s - fast heater, enclosed
+
+  bed:
+    thermal_mass: 130.0        # J/K - textured PEI on aluminum, larger bed
+    heating_power: 350.0       # W - high power bed for fast heating
+    cooling_coeff: 0.20        # W/K - enclosed chamber retains heat
+    ambient_temp: 25.0
+    pid:
+      kp: 45.00
+      ki: 0.55
+      kd: 300.00
+    noise_amplitude: 0.1
+    max_heating_rate: 3.0      # C/s - fast bed heating
+
+  chamber:
+    thermal_mass: 800.0        # J/K - large enclosed air volume + panels
+    heating_power: 0.0         # W - no dedicated chamber heater, heated by bed
+    cooling_coeff: 0.15        # W/K - insulated enclosure, slow cooling
+    ambient_temp: 25.0
+    noise_amplitude: 0.5
+    max_temp: 60.0
+
+  response_delay_ms: 20        # fast ARM processor

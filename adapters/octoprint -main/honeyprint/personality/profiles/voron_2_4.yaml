@@ -1,0 +1,130 @@
+# VORON 2.4 Printer Personality Profile
+# Community-designed enclosed CoreXY running Klipper firmware.
+# Typically built from a kit with user-selected components.
+
+printer:
+  name: "VORON 2.4r2"
+  manufacturer: "VORON Design (Kit)"
+  model: "V2.4r2 350"
+  firmware: "Klipper"
+  firmware_version: "0.12.0"
+  firmware_string: "Klipper v0.12.0-114-g75965fa1"
+  machine_uuid: "00000000-0000-0000-0000-000000000003"
+  notes: >
+    Klipper runs on a Raspberry Pi host communicating with an MCU
+    (e.g. Octopus v1.1). The web interface is typically Mainsail or Fluidd.
+
+build_volume:
+  x: 350  # mm (350mm spec)
+  y: 350  # mm
+  z: 340  # mm
+
+nozzle:
+  diameter: 0.4  # mm (Revo or standard V6-style)
+  count: 1
+
+filament:
+  diameter: 1.75  # mm
+  supported_types:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PA (Nylon)
+    - PC
+    - TPU
+    - PVA
+    - HIPS
+    - PA-CF
+    - Polycarbonate-CF
+
+extruder:
+  num_extruders: 1
+  type: "Direct Drive (Clockwork 2 / Stealthburner)"
+  max_feedrate: 120  # mm/s
+  max_acceleration: 10000  # mm/s^2
+  steps_per_mm: 562.0  # typical CW2 with BMG gears
+  pressure_advance: 0.04  # Klipper pressure advance
+
+temperature:
+  max_temp_hotend: 300
+  max_temp_bed: 120
+  max_temp_chamber: 65
+  min_temp_hotend: 170
+  default_temp_hotend: 240   # typically used for ABS/ASA
+  default_temp_bed: 110
+
+capabilities:
+  heated_bed: true
+  heated_chamber: true       # enclosed, heats via bed soak
+  auto_bed_leveling: true    # Klipper quad-gantry-level + bed mesh
+  filament_sensor: true
+  power_loss_recovery: false # not standard on Klipper
+  sd_card: false             # prints via network / USB
+  usb_print: false
+  input_shaping: true        # Klipper input shaper with ADXL345
+  quad_gantry_level: true
+  bed_mesh: true
+  z_tilt_adjust: false       # V2.4 uses QGL instead
+
+motion:
+  max_feedrate_x: 500  # mm/s - CoreXY on linear rails
+  max_feedrate_y: 500
+  max_feedrate_z: 30
+  max_feedrate_e: 120
+  max_acceleration_x: 10000  # mm/s^2 - tuned with input shaper
+  max_acceleration_y: 10000
+  max_acceleration_z: 350
+  max_acceleration_e: 5000
+  default_acceleration: 5000
+  default_travel_acceleration: 8000
+  homing_feedrate_x: 100
+  homing_feedrate_y: 100
+  homing_feedrate_z: 15
+  square_corner_velocity: 5.0  # Klipper-specific
+
+communication:
+  serial_port: "/dev/ttyACM0"  # MCU connection
+  baud_rate: 250000
+  protocol: "klipper"          # Klipper host-MCU protocol
+  klipper_api_port: 7125       # Moonraker API
+  klipper_notes: >
+    Klipper uses a host (Raspberry Pi) + MCU architecture.
+    Moonraker provides the JSON-RPC API on port 7125.
+    Web frontends (Mainsail/Fluidd) connect via Moonraker.
+
+# Simulation parameters for realistic thermal behavior
+simulation:
+  hotend:
+    thermal_mass: 4.0          # J/K - Stealthburner with V6-style hotend
+    heating_power: 70.0        # W - high-power heater (60-80W common)
+    cooling_coeff: 0.04        # W/K - enclosed chamber, minimal ambient loss
+    ambient_temp: 25.0
+    pid:
+      kp: 18.00
+      ki: 1.20
+      kd: 85.00
+    noise_amplitude: 0.2       # C
+    max_heating_rate: 7.0      # C/s - powerful heater in enclosed space
+
+  bed:
+    thermal_mass: 250.0        # J/K - 350mm cast aluminum plate, heavy
+    heating_power: 750.0       # W - 350mm AC mains-powered bed (Keenovo)
+    cooling_coeff: 0.18        # W/K - enclosed, retains heat well
+    ambient_temp: 25.0
+    pid:
+      kp: 40.00
+      ki: 0.40
+      kd: 280.00
+    noise_amplitude: 0.15
+    max_heating_rate: 2.5      # C/s - high power but very large thermal mass
+
+  chamber:
+    thermal_mass: 1200.0       # J/K - 350mm^3 enclosed volume, larger than X1C
+    heating_power: 0.0         # W - no dedicated heater, bed soak only
+    cooling_coeff: 0.10        # W/K - foam-insulated panels, slow cooling
+    ambient_temp: 25.0
+    noise_amplitude: 0.4
+    max_temp: 65.0
+
+  response_delay_ms: 10        # Klipper on RPi is fast

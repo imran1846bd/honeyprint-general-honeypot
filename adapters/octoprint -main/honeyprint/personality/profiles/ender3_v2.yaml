@@ -1,0 +1,99 @@
+# Creality Ender-3 V2 Printer Personality Profile
+# A popular entry-level FDM printer with a 32-bit mainboard.
+
+printer:
+  name: "Ender-3 V2"
+  manufacturer: "Creality"
+  model: "Ender-3 V2"
+  firmware: "Marlin"
+  firmware_version: "2.1.2.1"
+  firmware_string: "Marlin 2.1.2.1 (Oct 15 2023)"
+  machine_uuid: "00000000-0000-0000-0000-000000000000"
+
+build_volume:
+  x: 220  # mm
+  y: 220  # mm
+  z: 250  # mm
+
+nozzle:
+  diameter: 0.4  # mm
+  count: 1
+
+filament:
+  diameter: 1.75  # mm
+  supported_types:
+    - PLA
+    - PETG
+    - TPU
+    - ABS
+
+extruder:
+  num_extruders: 1
+  type: "Bowden"
+  max_feedrate: 50  # mm/s
+  max_acceleration: 500  # mm/s^2
+  steps_per_mm: 93.0
+
+temperature:
+  max_temp_hotend: 260
+  max_temp_bed: 100
+  min_temp_hotend: 170   # minimum for extrusion
+  default_temp_hotend: 200
+  default_temp_bed: 60
+
+capabilities:
+  heated_bed: true
+  heated_chamber: false
+  auto_bed_leveling: false
+  filament_sensor: false
+  power_loss_recovery: true
+  sd_card: true
+  usb_print: true
+
+motion:
+  max_feedrate_x: 500  # mm/min
+  max_feedrate_y: 500
+  max_feedrate_z: 5
+  max_feedrate_e: 25
+  max_acceleration_x: 500
+  max_acceleration_y: 500
+  max_acceleration_z: 100
+  max_acceleration_e: 5000
+  default_acceleration: 500
+  default_travel_acceleration: 500
+  homing_feedrate_x: 50
+  homing_feedrate_y: 50
+  homing_feedrate_z: 4
+
+communication:
+  serial_port: "/dev/ttyUSB0"
+  baud_rate: 115200
+  protocol: "serial"
+
+# Simulation parameters for realistic thermal behavior
+simulation:
+  hotend:
+    thermal_mass: 4.5          # J/K - small hotend block (aluminum)
+    heating_power: 40.0        # W - standard 40W heater cartridge
+    cooling_coeff: 0.08        # W/K - open-frame, moderate cooling
+    ambient_temp: 25.0         # C
+    pid:
+      kp: 22.20
+      ki: 1.08
+      kd: 114.00
+    noise_amplitude: 0.3       # C - temperature readout noise
+    max_heating_rate: 4.5      # C/s approximate
+
+  bed:
+    thermal_mass: 120.0        # J/K - glass bed on aluminum plate
+    heating_power: 235.0       # W - standard bed heater
+    cooling_coeff: 0.45        # W/K - open frame, cools relatively fast
+    ambient_temp: 25.0
+    pid:
+      kp: 72.00
+      ki: 1.50
+      kd: 480.00
+    noise_amplitude: 0.2
+    max_heating_rate: 1.5      # C/s approximate
+
+  response_delay_ms: 50        # simulated serial response delay

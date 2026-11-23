@@ -1,0 +1,182 @@
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv / poetry
+Pipfile.lock
+poetry.lock
+
+# =============================================================================
+# Virtual environments
+# =============================================================================
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# =============================================================================
+# Environment / secrets
+# =============================================================================
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+secrets/
+
+# =============================================================================
+# HoneyPrint runtime data
+# =============================================================================
+# JSON-line fallback logs and any captured interaction data
+logs/
+*.jsonl
+
+# Application data and uploads
+data/
+honeyprint_data/
+mongo_data/
+uploads/
+
+# PCAP captures (if enabled)
+*.pcap
+*.pcapng
+
+# Local config overrides (keep example/template only)
+config/honeyprint.local.yaml
+config/*.local.yaml
+
+# Generated G-code uploaded by adversaries (keep examples in SD card sim)
+captured_gcode/
+
+# =============================================================================
+# Docker
+# =============================================================================
+# Don't ignore Dockerfile / docker-compose.yml — they should be committed.
+# Just ignore local override and runtime artefacts.
+docker-compose.override.yml
+.docker/
+
+# =============================================================================
+# Editors / IDEs
+# =============================================================================
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.spyderproject
+.spyproject
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.history/
+.ionide/
+
+# Vim / Emacs
+*.swp
+*.swo
+*.swn
+*~
+\#*\#
+.\#*
+
+# =============================================================================
+# OS
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# =============================================================================
+# Claude Code
+# =============================================================================
+.claude/
+.claude-code/
+.claude.json
+claude-code.log
+
+# =============================================================================
+# Misc
+# =============================================================================
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+node_modules/
+
+paper_ref/lopez2026honeysat.pdf

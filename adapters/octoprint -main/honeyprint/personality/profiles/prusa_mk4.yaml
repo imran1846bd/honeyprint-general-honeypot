@@ -1,0 +1,110 @@
+# Prusa MK4 Printer Personality Profile
+# High-quality direct-drive FDM printer with input shaping and load cell.
+
+printer:
+  name: "Original Prusa MK4"
+  manufacturer: "Prusa Research"
+  model: "MK4"
+  firmware: "Prusa-Firmware-Buddy"
+  firmware_version: "5.1.2"
+  firmware_string: "Prusa-Firmware-Buddy 5.1.2 (Build 4287)"
+  machine_uuid: "00000000-0000-0000-0000-000000000001"
+
+build_volume:
+  x: 250  # mm
+  y: 210  # mm
+  z: 220  # mm
+
+nozzle:
+  diameter: 0.4  # mm
+  count: 1
+
+filament:
+  diameter: 1.75  # mm
+  supported_types:
+    - PLA
+    - PETG
+    - ASA
+    - ABS
+    - PC
+    - CPE
+    - PVA
+    - HIPS
+    - PP
+    - Flex
+    - PA (Nylon)
+
+extruder:
+  num_extruders: 1
+  type: "Direct Drive (Nextruder)"
+  max_feedrate: 80  # mm/s
+  max_acceleration: 5000  # mm/s^2
+  steps_per_mm: 830.0  # planetary gearbox, high resolution
+
+temperature:
+  max_temp_hotend: 290
+  max_temp_bed: 120
+  min_temp_hotend: 170
+  default_temp_hotend: 215
+  default_temp_bed: 60
+
+capabilities:
+  heated_bed: true
+  heated_chamber: false
+  auto_bed_leveling: true
+  filament_sensor: true
+  power_loss_recovery: true
+  sd_card: false   # uses USB drive
+  usb_print: true
+  input_shaping: true
+  load_cell: true
+  ethernet: false
+  wifi: true
+
+motion:
+  max_feedrate_x: 600  # mm/min
+  max_feedrate_y: 600
+  max_feedrate_z: 12
+  max_feedrate_e: 80
+  max_acceleration_x: 2500
+  max_acceleration_y: 2500
+  max_acceleration_z: 400
+  max_acceleration_e: 5000
+  default_acceleration: 1250
+  default_travel_acceleration: 1250
+  homing_feedrate_x: 100
+  homing_feedrate_y: 100
+  homing_feedrate_z: 8
+
+communication:
+  serial_port: "/dev/ttyACM0"
+  baud_rate: 115200
+  protocol: "serial"
+
+# Simulation parameters for realistic thermal behavior
+simulation:
+  hotend:
+    thermal_mass: 3.8          # J/K - Nextruder has compact hotend
+    heating_power: 50.0        # W - 50W heater cartridge
+    cooling_coeff: 0.10        # W/K - open frame with part-cooling fan
+    ambient_temp: 25.0
+    pid:
+      kp: 7.00
+      ki: 0.50
+      kd: 45.00
+    noise_amplitude: 0.15      # C - higher quality thermistor
+    max_heating_rate: 6.0      # C/s - faster heater
+
+  bed:
+    thermal_mass: 100.0        # J/K - spring steel PEI sheet + heatbed
+    heating_power: 300.0       # W - higher power bed heater
+    cooling_coeff: 0.50        # W/K - open frame, steel sheet
+    ambient_temp: 25.0
+    pid:
+      kp: 55.00
+      ki: 0.70
+      kd: 350.00
+    noise_amplitude: 0.1
+    max_heating_rate: 2.0      # C/s
+
+  response_delay_ms: 30        # faster MCU

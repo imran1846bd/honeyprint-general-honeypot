@@ -1,0 +1,56 @@
+# =============================================================================
+# HoneyPrint Configuration
+# Additive Manufacturing Honeypot Framework
+#
+# This file configures the ground segment (management network) settings.
+# Printer-specific settings are loaded from personality profiles.
+# =============================================================================
+
+# Ground Configuration (analogous to HoneySat's Ground Configuration)
+ground:
+  web_port: 80
+  telnet_port: 23
+  vnc_port: 5901
+  mongodb_uri: "mongodb://honeyprint_mongo:27017"
+  mongodb_db: "honeyprint_logs"
+
+  # Web Interface settings
+  web_title: "OctoPrint"
+  web_auth_enabled: true
+  web_username: "admin"
+  web_password: "admin"
+  api_key: "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"
+
+  # Webcam simulation
+  enable_webcam: true
+  webcam_url: "/webcam/?action=stream"
+
+# Printer Personality (which profile to load)
+printer:
+  profile: "ender3_v2"
+
+# Simulation Parameters
+simulation:
+  thermal_update_interval: 1.0
+  motion_update_interval: 0.1
+  print_job_update_interval: 1.0
+  ambient_temperature: 22.0
+  voltage: 24.0
+  noise_stddev: 0.3
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  log_telnet: true
+  log_web: true
+  log_api: true
+  log_gcode: true
+  log_network: true
+  capture_pcap: false
+
+# Network Simulator (analogous to HoneySat's Radio Simulator)
+network:
+  enabled: false
+  latency_ms: 0
+  jitter_ms: 0
+  packet_loss_percent: 0
