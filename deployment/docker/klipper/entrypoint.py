@@ -49,10 +49,8 @@ filament_diameter: {extruder['filament_diameter']}
 heater_pin: PB4
 sensor_type: EPCOS 100K B57560G104F
 sensor_pin: PA7
-control: pid
-pid_Kp: 22.2
-pid_Ki: 1.08
-pid_Kd: 114
+control: watermark
+max_delta: 0.25
 min_temp: 0
 min_extrude_temp: {extruder['min_extrude_temp']}
 max_temp: {extruder['max_temp']}
@@ -63,6 +61,7 @@ heater_pin: PB3
 sensor_type: EPCOS 100K B57560G104F
 sensor_pin: PA0
 control: watermark
+max_delta: 0.25
 min_temp: 0
 max_temp: {native['heated_bed']['max_temp']}
 ''')
@@ -89,7 +88,7 @@ gcode:
 
 def main():
     root=Path('/data');root.mkdir(exist_ok=True)
-    for name in ('logs','config','gcodes'): (root/name).mkdir(exist_ok=True)
+    for name in ('logs','config','gcodes','thermal_targets'): (root/name).mkdir(exist_ok=True)
     profile=json.loads(os.environ['HONEYPRINT_PROFILE_JSON'])
     settings=json.loads(os.environ.get('HONEYPRINT_KLIPPER_SETTINGS_JSON', '{}'))
     (root/'config/printer.cfg').write_text(printer_config(profile, settings))
@@ -110,16 +109,32 @@ cors_domains:
 enable_object_processing: False
 ''')
     stopping=threading.Event()
+    # SIGUSR1 = press the simulated board's reset button. Klipper's FIRMWARE_RESTART
+    # cannot reset the emulated AVR (no DTR on a pty), so after an MCU shutdown the
+    # HoneyPrint adapter asks for this reset and then restarts the Klipper host.
+    reset=threading.Event()
     for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,lambda *_:stopping.set())
+    signal.signal(signal.SIGUSR1,lambda *_:reset.set())
     children=[];logs=[]
     try:
-        commands=[('/opt/klippy-env/bin/python','/bridge.py','-r','1','/opt/klipper/out/klipper.elf'),
+        # Simulate the firmware's 8 MHz oscillator at real-time pace.
+        # This leaves host CPU headroom without skewing Klipper's time bases.
+        commands=[('/opt/klippy-env/bin/python','/bridge.py','-s','8000000','-r','1','/opt/klipper/out/klipper.elf'),
                   ('/opt/klippy-env/bin/python','/opt/klipper/klippy/klippy.py',str(root/'config/printer.cfg'),'-a','/tmp/klippy.sock','-l',str(root/'logs/klippy.log')),
                   ('/opt/moonraker-env/bin/moonraker','-d',str(root),'-c',str(root/'config/moonraker.conf'),'-l',str(root/'logs/moonraker.log'))]
         for name,command in zip(('avr','host','api'),commands):
             log=(root/'logs'/f'{name}.console.log').open('ab');logs.append(log)
             children.append(subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT))
         while not stopping.wait(.2):
+            if reset.is_set():
+                reset.clear()
+                avr=children[0]
+                if avr.poll() is None:
+                    avr.terminate()
+                    try: avr.wait(timeout=10)
+                    except subprocess.TimeoutExpired: avr.kill();avr.wait(timeout=5)
+                children[0]=subprocess.Popen(commands[0],stdout=logs[0],stderr=subprocess.STDOUT)
+                continue
             if any(child.poll() is not None for child in children):
                 raise RuntimeError('A Klipper stack component stopped')
         return 0

@@ -18,6 +18,8 @@ import time
 
 from adapters.base_adapter import AdapterError, PlatformAdapter
 from core.profile_loader import load_profile
+from core.storage_paths import artifact_root
+from telemetry.artifact_storage import ArtifactStorage
 from deployment.environment_manager import OctoPrintEnvironment
 from recipes.octoprint import OCTOPRINT_VERSION
 from plugins.manufacturing.pipeline import STAGES, validate_stages
@@ -75,6 +77,7 @@ class OctoPrintAdapter(PlatformAdapter):
         self.startup_timeout = startup_timeout
         self._environment = None
         self._channel = None
+        self._artifacts = None
         self._token = None
         self._credentials = None
         self._handle = None
@@ -118,7 +121,18 @@ class OctoPrintAdapter(PlatformAdapter):
             return
         try:
             self._channel = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                # A large receive buffer keeps bursts of plugin events (G-code during a print) from being lost.
+                self._channel.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8388608)
+            except OSError:
+                pass
             self._channel.bind(('127.0.0.1', 0))
+            settings = self.common_settings
+            # Uploaded files are retained as evidence, like Klipper; default limits mean no fixed limit.
+            self._artifacts = ArtifactStorage(artifact_root(self.runtime_dir, settings) / cfg['id'],
+                max_bytes=None if settings['artifact_max_total_bytes'] == 104857600 else settings['artifact_max_total_bytes'],
+                max_artifacts=settings['artifact_max_files'],
+                max_file_bytes=None if settings['artifact_max_file_bytes'] == 1048576 else settings['artifact_max_file_bytes'])
             self._channel.settimeout(0.2)
             self._token = secrets.token_hex(32)
             self._environment = OctoPrintEnvironment(
@@ -242,6 +256,9 @@ class OctoPrintAdapter(PlatformAdapter):
                         if not isinstance(record.get('token'), str) or not hmac.compare_digest(record['token'], self._token):
                             continue
                         event = record['event']
+                        if (isinstance(event, dict) and event.get('event_type') == 'file.artifact'
+                                and event.get('action') == 'add'):
+                            event = self._retain_upload(handle, event)
                     else:
                         printer = self._check_virtual(handle)
                         flags = printer['state']['flags']
@@ -266,6 +283,25 @@ class OctoPrintAdapter(PlatformAdapter):
                         handle.stop_event.wait(0.2)
         handle.observer = threading.Thread(target=consume, name=f'Audit-{handle.instance_id}', daemon=True)
         handle.observer.start()
+
+    def _retain_upload(self, handle, event):
+        """Copy an uploaded OctoPrint file into the evidence store; add its hash and size."""
+        metadata = dict(event.get('metadata') or {})
+        try:
+            if self._artifacts is None or handle.environment is None or metadata.get('storage') != 'local':
+                return event
+            uploads = (Path(handle.environment.root) / 'uploads').resolve()
+            relative = metadata.get('path') or metadata.get('filename')
+            if not isinstance(relative, str) or not relative:
+                raise ValueError('No file path')
+            source = (uploads / relative).resolve()
+            if not source.is_relative_to(uploads) or not source.is_file():
+                raise ValueError('File not in OctoPrint uploads')
+            record = self._artifacts.store_file(source, 0, source.stat().st_size)
+            metadata.update(record)
+        except (OSError, ValueError) as error:
+            metadata['retention'] = 'not retained: ' + str(error)[:120]
+        return {**event, 'metadata': metadata}
 
     def _verify_handle(self, handle):
         if handle is not self._handle:

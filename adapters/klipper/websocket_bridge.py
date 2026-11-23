@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import re
+from core.gcode_files import safe_label, valid_directory, valid_gcode_name
 import select
 import struct
 import threading
@@ -68,6 +69,17 @@ def write_frame(connection,lock,opcode,data):
     with lock: connection.sendall(header+data)
 
 
+def rpc_files(params):
+    """File names an RPC call acts on (print, delete, move, copy), bounded for evidence."""
+    if not isinstance(params,dict): return {}
+    found={}
+    for key in ('filename','path','source','dest'):
+        value=params.get(key)
+        if isinstance(value,str) and value:
+            found[key]=safe_label(value,240,path=True)
+    return found
+
+
 def validate_rpc(message):
     data=json.loads(message)
     if not isinstance(data,dict) or data.get('jsonrpc')!='2.0' or data.get('method') not in RPC_METHODS:
@@ -77,7 +89,8 @@ def validate_rpc(message):
     method=data['method']
     if method=='printer.print.start':
         filename=params.get('filename','')
-        if not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.gcode',filename,re.I):
+        folder,_,name=filename.rpartition('/') if isinstance(filename,str) else ('','',None)
+        if not valid_gcode_name(name) or not valid_directory(folder):
             raise ValueError('Prints require a retained G-code filename')
     if method.startswith('server.files.') and method not in ('server.files.list','server.files.metadata'):
         for key in ('path','source','dest'):
@@ -141,15 +154,22 @@ def serve(handler,environment,emit,stopping):
             if not final: continue
             in_fragment=False;message=fragmented.decode('utf-8')
             try: rpc=validate_rpc(message)
-            except ValueError:
+            except ValueError as error:
                 response={'jsonrpc':'2.0','error':{'code':-32601,'message':'Unsupported or invalid method'}}
+                candidate=None
                 try:
                     candidate=json.loads(message)
                     if isinstance(candidate,dict) and 'id' in candidate: response['id']=candidate['id']
                 except ValueError: pass
+                # Refused calls (e.g. machine.reboot, printing ../printer.cfg) are evidence too.
+                method=candidate.get('method') if isinstance(candidate,dict) else None
+                emit({'source':'klipper','event_type':'api.request','action':'rpc','outcome':'rejected',
+                      'simulation':True,'metadata':{'method':safe_label(method,96) if isinstance(method,str) else '[invalid]',
+                                                    'reason':safe_label(str(error),120),
+                                                    **rpc_files(candidate.get('params') if isinstance(candidate,dict) else None)}})
                 write_frame(handler.connection,lock,1,json.dumps(response).encode());continue
             emit({'source':'klipper','event_type':'api.request','action':'rpc','outcome':'observed',
-                  'simulation':True,'metadata':{'method':rpc['method']}})
+                  'simulation':True,'metadata':{'method':rpc['method'],**rpc_files(rpc.get('params'))}})
             if rpc['method']=='printer.gcode.script':
                 script=rpc.get('params',{}).get('script','')
                 if not isinstance(script,str): raise ValueError('Invalid script')

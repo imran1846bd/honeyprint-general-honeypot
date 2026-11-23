@@ -8,7 +8,10 @@ Developers replace this class with their installed platform implementation.
 from copy import deepcopy
 from pathlib import Path
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import base64
+import binascii
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import math
 from html import escape
@@ -16,16 +19,29 @@ import re
 from core.storage_paths import artifact_root
 import queue
 import threading
+import time
 
 from adapters.base_adapter import AdapterError, PlatformAdapter
+from core.quiet_http import QuietThreadingHTTPServer
 from core.profile_loader import load_profile
 from telemetry.artifact_storage import ArtifactStorage
+from telemetry.ui_capture import SCRIPT, observation
+from core.gcode_files import safe_label, valid_gcode_name
+from urllib.parse import unquote
 from plugins.simulators.printer import PrinterSimulator
 from plugins.manufacturing.pipeline import STAGES, validate_stages, run_job
 from plugins.manufacturing.job_intake import job_intake
 from plugins.manufacturing.build_preparation import build_preparation
 
-FILE_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.gcode$', re.I)
+# With the default (unset) upload limit, accept real slicer files up to this size, like Klipper.
+DEFAULT_UPLOAD_CAP = 536870912
+
+
+class UploadRejected(ValueError):
+    """A refused upload, with the submitted name and reason kept for evidence."""
+    def __init__(self, reason, filename=None):
+        super().__init__(reason)
+        self.filename = filename
 
 
 @dataclass
@@ -36,7 +52,7 @@ class LabHandle:
     simulator: object = field(default=None, repr=False)
     artifacts: object = field(default=None, repr=False)
     lock: object = field(default_factory=threading.RLock, repr=False)
-    events: object = field(default_factory=lambda: queue.Queue(maxsize=1024), repr=False)
+    events: object = field(default_factory=lambda: queue.Queue(maxsize=65536), repr=False)
     stopped: object = field(default_factory=threading.Event, repr=False)
     server_thread: object = field(default=None, repr=False)
     observer_thread: object = field(default=None, repr=False)
@@ -61,8 +77,9 @@ class LabHandle:
 
     def emit(self, kind, action, outcome, metadata=None):
         try:
-            self.events.put_nowait({'source': 'custom', 'event_type': kind, 'action': action,
-                                   'outcome': outcome, 'simulation': True, 'metadata': metadata or {}})
+            # Wait briefly for the collector instead of dropping evidence during bursts.
+            self.events.put({'source': 'custom', 'event_type': kind, 'action': action,
+                             'outcome': outcome, 'simulation': True, 'metadata': metadata or {}}, timeout=2)
         except queue.Full:
             with self.lock: self.dropped += 1
 
@@ -155,19 +172,47 @@ class LabAdapter(PlatformAdapter):
         if self._handle and not self._handle.stopped.is_set():
             raise AdapterError('Custom instance is already running')
         self._profile = load_profile(plan['config']['printer_profile'])
-        if plan['config'].get('stages'):
-            if self._runtime_dir is None: raise AdapterError('Manufacturing requires an artifact directory')
-            self._artifacts = ArtifactStorage(artifact_root(self._runtime_dir,self._settings) / plan['config']['id'],
-                max_bytes=self._settings['artifact_max_total_bytes'],
-                max_artifacts=self._settings['artifact_max_files'],
-                max_file_bytes=self._settings['artifact_max_file_bytes'])
+        if plan['config'].get('stages') and self._runtime_dir is None:
+            raise AdapterError('Manufacturing requires an artifact directory')
+        if self._runtime_dir is not None:
+            # Uploads need the evidence store whether or not manufacturing stages are enabled.
+            # Default limits mean "no fixed limit", as on Klipper; explicit settings still apply.
+            settings = self._settings
+            self._artifacts = ArtifactStorage(artifact_root(self._runtime_dir,settings) / plan['config']['id'],
+                max_bytes=None if settings['artifact_max_total_bytes'] == 104857600 else settings['artifact_max_total_bytes'],
+                max_artifacts=settings['artifact_max_files'],
+                max_file_bytes=None if settings['artifact_max_file_bytes'] == 1048576 else settings['artifact_max_file_bytes'])
 
     def launch_or_attach(self, plan):
         if self._profile is None: raise AdapterError('Custom instance is not prepared')
         adapter = self
         class Handler(BaseHTTPRequestHandler):
+            server_version = 'nginx/1.18.0'; sys_version = ''  # do not announce Python's BaseHTTPServer
             def setup(self):
                 super().setup(); self.connection.settimeout(2)
+                self.connection_seen = False; self.connection_started = time.monotonic()
+            def handle(self):
+                try: super().handle()
+                finally:
+                    if not self.connection_seen and adapter._handle:
+                        # Port scan or service probe: connected without a usable HTTP request.
+                        raw = getattr(self, 'raw_requestline', b'') or b''
+                        adapter._handle.emit('network.connection', 'connect', 'no_data' if not raw else 'invalid',
+                            {'service': 'http', 'port': self.server.server_port,
+                             'peer': str(self.client_address[0])[:64], 'bytes_received': len(raw),
+                             'duration_ms': int((time.monotonic() - self.connection_started) * 1000)})
+            def agent(self):
+                # The client's self-declared name: browser or scanner tool (nmap, nikto, sqlmap, ...).
+                value = self.headers.get('User-Agent') if self.headers else None
+                return {'user_agent': safe_label(value, 160, path=True)} if value else {}
+            def send_error(self, code, message=None, explain=None):
+                if not self.connection_seen and adapter._handle:
+                    self.connection_seen = True
+                    raw = getattr(self, 'raw_requestline', b'') or b''
+                    adapter._handle.emit('http.request', 'INVALID', 'observed',
+                        {'route': 'malformed', 'status': int(code), 'bytes_received': len(raw),
+                         'peer': str(self.client_address[0])[:64]})
+                super().send_error(code, message, explain)
             def log_message(self, *args): pass
             def respond(self, code, data, content_type='application/json'):
                 body = json.dumps(data).encode() if content_type == 'application/json' else data.encode()
@@ -176,8 +221,9 @@ class LabAdapter(PlatformAdapter):
                 self.send_header('X-Content-Type-Options', 'nosniff'); self.end_headers()
                 self.wfile.write(body)
             def do_GET(self):
+                self.connection_seen = True
                 h = adapter._handle
-                status = 200 if self.path in ('/', '/api/state', '/api/job', '/api/files') or self.path.startswith('/api/files/') else 404
+                status = 200 if self.path in ('/', '/api/state', '/api/job', '/api/files', '/honeyprint-interactions.js') or self.path.startswith('/api/files/') else 404
                 if self.path == '/':
                     page = '''<!doctype html><html><meta charset="utf-8"><title>HoneyPrint Custom Lab</title>
 <h1>''' + escape(h.profile['name']) + '''</h1><p>Custom Printer Lab virtual job and sensor status</p>
@@ -191,8 +237,10 @@ async function post(path,data){const r=await fetch(path,{method:'POST',headers:{
 async function upload(){try{const f=document.getElementById('file').files[0];if(!f)throw Error('Choose a G-code file');await post('/api/files',{name:f.name,gcode:await f.text()});document.getElementById('message').textContent='Uploaded '+f.name;await refresh()}catch(e){document.getElementById('message').textContent=e.message}}
 async function job(command){try{const name=document.getElementById('names').value;await post('/api/job',command==='select'?{command,filename:name}:{command});document.getElementById('message').textContent=command+' accepted';await refresh()}catch(e){document.getElementById('message').textContent=e.message}}
 async function refresh(){try{const [s,j,f]=await Promise.all(['/api/state','/api/job','/api/files'].map(p=>fetch(p).then(r=>r.json())));document.getElementById('state').textContent=JSON.stringify({printer:s,job:j},null,2);const e=document.getElementById('names');const keep=e.value;e.replaceChildren(...f.files.map(n=>new Option(n,n)));if(f.files.includes(keep))e.value=keep}catch(e){document.getElementById('message').textContent=e.message}}
-setInterval(refresh,500);refresh();</script></html>'''
+setInterval(refresh,500);refresh();</script><script src="/honeyprint-interactions.js" defer></script></html>'''
                     self.respond(200, page, 'text/html; charset=utf-8')
+                elif self.path == '/honeyprint-interactions.js':
+                    self.respond(200, SCRIPT.decode('utf-8'), 'text/javascript; charset=utf-8')
                 elif self.path == '/api/state':
                     with h.lock: self.respond(200, dict(h.simulator.snapshot(),printer_name=h.profile['name'],
                         job_state=h.job_state,job_name=h.job_name,job_progress=h.job_progress))
@@ -202,29 +250,49 @@ setInterval(refresh,500);refresh();</script></html>'''
                 elif self.path == '/api/files':
                     with h.lock: self.respond(200, {'files':sorted(h.files)})
                 elif self.path.startswith('/api/files/'):
-                    name=self.path[len('/api/files/'):]
-                    if not FILE_NAME.fullmatch(name) or name not in h.files:
+                    name=unquote(self.path[len('/api/files/'):])
+                    if not valid_gcode_name(name) or name not in h.files:
                         status=404;self.respond(404, {'error':'unknown file'})
                     else:
                         with h.lock: content=h.artifacts.read(h.files[name])
-                        self.respond(200,content.decode('utf-8'),'text/plain; charset=utf-8')
+                        self.respond(200,content.decode('utf-8','replace'),'text/plain; charset=utf-8')
                 else: self.respond(404, {'error': 'unknown endpoint'})
                 if self.path not in ('/api/state', '/api/job', '/api/files') or status >= 400:
                     h.emit('http.request', 'GET', 'observed',
-                           {'route': 'root' if self.path == '/' else self.path[:128], 'status': status})
+                           {'route': 'root' if self.path == '/' else self.path[:128], 'status': status, **self.agent()})
             def do_POST(self):
+                self.connection_seen = True
                 h = adapter._handle
                 status = 200
+                upload_bytes = 0; request_digest = None
                 try:
+                    if self.path == '/honeyprint/interactions':
+                        length = int(self.headers.get('Content-Length', '0'))
+                        origin = self.headers.get('Origin')
+                        if (self.headers.get('Content-Type') != 'application/json' or not 1 <= length <= 1024
+                                or self.headers.get('Transfer-Encoding')
+                                or (origin and origin != 'http://' + self.headers.get('Host', ''))):
+                            raise ValueError()
+                        event = observation(json.loads(self.rfile.read(length)))
+                        h.emit(event['event_type'], event['action'], event['outcome'], event['metadata'])
+                        self.respond(200, {})
+                        return
                     if self.path not in ('/api/command', '/api/job', '/api/preheat', '/api/files') or self.headers.get('Transfer-Encoding'):
                         raise ValueError()
                     length = int(self.headers.get('Content-Length', '0'))
-                    limit = (adapter._settings['upload_max_bytes']*2+512 if self.path == '/api/files'
-                             else adapter._settings['upload_max_bytes'] if self.path == '/api/job'
+                    upload_limit = adapter._settings['upload_max_bytes']
+                    upload_cap = DEFAULT_UPLOAD_CAP if upload_limit == 1048576 else upload_limit*2+512
+                    limit = (upload_cap if self.path == '/api/files'
+                             else upload_limit if self.path == '/api/job'
                              else adapter._settings['request_max_bytes'])
+                    upload_bytes = length
                     if length > limit: raise OverflowError()
                     if length < 1: raise ValueError()
-                    data = json.loads(self.rfile.read(length))
+                    if self.path == '/api/files': self.connection.settimeout(60)
+                    body = self.rfile.read(length)
+                    if len(body) != length: raise ValueError()
+                    if self.path == '/api/files': request_digest = hashlib.sha256(body).hexdigest()
+                    data = json.loads(body)
                     if not isinstance(data, dict): raise ValueError()
                     if self.path == '/api/preheat':
                         if data: raise ValueError()
@@ -237,19 +305,31 @@ setInterval(refresh,500);refresh();</script></html>'''
                         self.respond(200,response)
                         h.emit('printer.command','preheat','accepted')
                     elif self.path == '/api/files':
-                        if set(data) != {'name','gcode'} or not isinstance(data['name'],str) or not FILE_NAME.fullmatch(data['name']) or not isinstance(data['gcode'],str): raise ValueError()
-                        content=data['gcode'].encode('utf-8')
+                        name = data.get('name')
+                        if not isinstance(name, str) or not (set(data) == {'name','gcode'} or set(data) == {'name','gcode_base64'}):
+                            raise UploadRejected('Invalid upload request', name)
+                        if not valid_gcode_name(name): raise UploadRejected('Unsupported G-code filename', name)
+                        try:
+                            # gcode_base64 keeps exact bytes (console uploads); gcode is the browser's text.
+                            content = (base64.b64decode(data['gcode_base64'], validate=True) if 'gcode_base64' in data
+                                       else data['gcode'].encode('utf-8'))
+                        except (binascii.Error, TypeError, AttributeError, UnicodeError):
+                            raise UploadRejected('Invalid G-code content', name) from None
+                        if not content: raise UploadRejected('Empty G-code file', name)
+                        if b'\0' in content: raise UploadRejected('Binary content is not G-code text', name)
                         with h.lock:
-                            if h.artifacts is None: raise ValueError()
-                            artifact=h.artifacts.store(content)
-                            h.files[data['name']]=artifact['sha256']
-                        self.respond(200, {'name':data['name'],'size_bytes':len(content)})
-                        h.emit('file.artifact','upload','accepted', {'filename':data['name'], 'sha256':artifact['sha256']})
+                            if h.artifacts is None: raise UploadRejected('Evidence storage is unavailable', name)
+                            try: artifact=h.artifacts.store(content)
+                            except ValueError as error: raise UploadRejected(str(error), name) from None
+                            h.files[name]=artifact['sha256']
+                        self.respond(200, {'name':name,'size_bytes':len(content)})
+                        h.emit('file.artifact','upload','accepted', {'filename':name, 'sha256':artifact['sha256'],
+                                                                      'size_bytes':len(content),'artifact':artifact['artifact']})
                     elif self.path == '/api/job' and 'command' in data:
                         action=data.get('command')
                         if action=='select':
                             name=data.get('filename')
-                            if set(data)!={'command','filename'} or not isinstance(name,str) or not FILE_NAME.fullmatch(name): raise ValueError()
+                            if set(data)!={'command','filename'} or not valid_gcode_name(name): raise ValueError()
                             with h.lock:
                                 if name not in h.files or h.job_state in ('printing','paused'): raise ValueError()
                                 h.selected=name;h.job_state='idle';h.job_progress=0.0
@@ -272,7 +352,7 @@ setInterval(refresh,500);refresh();</script></html>'''
                         with h.lock:
                             if h.job_state in ('printing','paused'): raise ValueError()
                             content = data['gcode'].encode('utf-8')
-                            if not 1 <= len(content) <= h.artifacts.max_file_bytes: raise ValueError()
+                            if not 1 <= len(content) <= (h.artifacts.max_file_bytes or DEFAULT_UPLOAD_CAP): raise ValueError()
                             candidate = deepcopy(h.simulator)
                             result, events = run_job(content, candidate, h.stages)
                             artifact = h.artifacts.store(content)
@@ -294,12 +374,24 @@ setInterval(refresh,500);refresh();</script></html>'''
                 except OverflowError:
                     status=413; self.close_connection=True
                     self.respond(413, {'error':'request too large'})
-                except (ValueError, TypeError, OSError, IndexError):
+                    if self.path == '/api/files':
+                        h.emit('file.artifact','upload','rejected',{'reason':'Upload exceeds the configured limit',
+                                                                     'status':413,'request_bytes':upload_bytes})
+                except (ValueError, TypeError, OSError, IndexError) as error:
                     status = 400
                     self.respond(400, {'error': 'unsupported or invalid command'})
-                    h.emit('printer.command', 'execute', 'rejected')
-                h.emit('http.request', 'POST', 'observed', {'route': 'job' if self.path == '/api/job' else 'upload' if self.path == '/api/files' else 'command', 'status': status})
-        server = HTTPServer(('127.0.0.1', plan['config']['services']['web_port']), Handler)
+                    if self.path == '/api/files':
+                        meta = {'reason': safe_label(str(error) if isinstance(error, UploadRejected)
+                                                     else 'Invalid or unsupported upload data', 160),
+                                'status': 400, 'request_bytes': upload_bytes}
+                        if getattr(error, 'filename', None): meta['filename'] = safe_label(error.filename)
+                        if request_digest: meta['request_sha256'] = request_digest
+                        h.emit('file.artifact','upload','rejected',meta)
+                    else:
+                        h.emit('printer.command', 'execute', 'rejected')
+                h.emit('http.request', 'POST', 'observed', {'route': 'job' if self.path == '/api/job' else 'upload' if self.path == '/api/files' else 'command', 'status': status, **self.agent()})
+        # Threaded, so a large upload does not block the page's live status requests.
+        server = QuietThreadingHTTPServer(('127.0.0.1', plan['config']['services']['web_port']), Handler)
         handle = LabHandle(server, self._profile, stages=tuple(plan['config'].get('stages', ())), artifacts=self._artifacts)
         self._handle = handle
         handle.server_thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.1}, daemon=True)

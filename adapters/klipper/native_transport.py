@@ -21,6 +21,41 @@ with response:
                    'body':base64.b64encode(body).decode()}))
 '''
 
+UPLOAD_HELPER = '''
+import base64,http.client,json,sys,uuid
+filename,size,print_flag,directory=sys.argv[1],int(sys.argv[2]),sys.argv[3],sys.argv[4]
+boundary='honeyprint-'+uuid.uuid4().hex
+prefix=(f'--{boundary}\\r\\nContent-Disposition: form-data; name="root"\\r\\n\\r\\ngcodes\\r\\n'
+        f'--{boundary}\\r\\nContent-Disposition: form-data; name="print"\\r\\n\\r\\n{print_flag}\\r\\n'
+        f'--{boundary}\\r\\nContent-Disposition: form-data; name="file"; filename="{filename}"\\r\\n'
+        'Content-Type: application/octet-stream\\r\\n\\r\\n').encode()
+suffix=f'\\r\\n--{boundary}--\\r\\n'.encode()
+if directory:
+ prefix=prefix.replace(f'--{boundary}\\r\\nContent-Disposition: form-data; name="file"'.encode(),
+                       (f'--{boundary}\\r\\nContent-Disposition: form-data; name="path"\\r\\n\\r\\n{directory}\\r\\n'
+                        f'--{boundary}\\r\\nContent-Disposition: form-data; name="file"').encode())
+connection=http.client.HTTPConnection('127.0.0.1',7125,timeout=300)
+try:
+ connection.putrequest('POST','/server/files/upload')
+ connection.putheader('Content-Type','multipart/form-data; boundary='+boundary)
+ connection.putheader('Content-Length',str(len(prefix)+size+len(suffix)))
+ connection.endheaders()
+ connection.send(prefix)
+ remaining=size
+ while remaining:
+  chunk=sys.stdin.buffer.read(min(1048576,remaining))
+  if not chunk: raise ValueError('Incomplete G-code stream')
+  connection.send(chunk);remaining-=len(chunk)
+ connection.send(suffix)
+ response=connection.getresponse()
+ body=response.read(2097153)
+ if len(body)>2097152: raise ValueError('Response exceeds limit')
+ print(json.dumps({'status':response.status,'content_type':response.getheader('Content-Type','application/octet-stream'),
+                   'body':base64.b64encode(body).decode()}))
+finally:
+ connection.close()
+'''
+
 WS_HELPER = '''
 import asyncio,json,sys
 from tornado.websocket import websocket_connect
@@ -66,6 +101,29 @@ def request(environment, method, path, body=None, content_type='application/json
         return data['status'],data['content_type'],base64.b64decode(data['body'],validate=True)
     except (OSError,subprocess.SubprocessError,ValueError,KeyError):
         raise AdapterError('Native Moonraker HTTP request failed') from None
+
+
+def upload_file(environment, filename, path, print_after=False, directory=''):
+    """Stream a retained G-code file to Moonraker through the owned container."""
+    from pathlib import Path
+    from core.gcode_files import valid_directory, valid_gcode_name
+    # The shared rule excludes quotes and control characters, so the name is safe in the multipart header.
+    if not valid_gcode_name(filename):
+        raise AdapterError('Invalid G-code filename')
+    if not valid_directory(directory):
+        raise AdapterError('Invalid G-code directory')
+    source=Path(path)
+    try:
+        with source.open('rb') as stream:
+            result=subprocess.run(['docker','exec','-i',environment.name,'/opt/moonraker-env/bin/python',
+                                   '-c',UPLOAD_HELPER,filename,str(source.stat().st_size),
+                                   'true' if print_after else 'false',directory],stdin=stream,text=True,
+                                  capture_output=True,timeout=3600,check=True)
+        if len(result.stdout)>3000000: raise ValueError()
+        data=json.loads(result.stdout)
+        return data['status'],data['content_type'],base64.b64decode(data['body'],validate=True)
+    except (OSError,subprocess.SubprocessError,ValueError,KeyError):
+        raise AdapterError('Native Moonraker upload failed') from None
 
 
 def websocket(environment):

@@ -7,7 +7,9 @@ HONEYPRINT_INSTANCE_TOKEN as X-HoneyPrint-Instance on its health endpoint.
 import http.client
 import json
 import os
+from core.quiet_http import QuietHandlingMixin
 from pathlib import Path
+import re
 import secrets
 import signal
 import socket
@@ -18,6 +20,7 @@ import time
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from adapters.base_adapter import AdapterError,PlatformAdapter
 from core.profile_loader import load_profile
+from telemetry.ui_capture import SCRIPT, observation
 
 
 class CustomProcessAdapter(PlatformAdapter):
@@ -85,6 +88,18 @@ class CustomProcessAdapter(PlatformAdapter):
                     try:
                         if not self.path.startswith('/') or self.path.startswith('//') or len(self.path)>8192 or self.headers.get('Transfer-Encoding'):
                             raise ValueError()
+                        if self.path == '/honeyprint-interactions.js' and self.command == 'GET':
+                            status=200;body=SCRIPT;headers=[('Content-Type','text/javascript; charset=utf-8')]
+                            return self.finish_response(status,body,headers,record=False)
+                        if self.path == '/honeyprint/interactions' and self.command == 'POST':
+                            length=int(self.headers.get('Content-Length','0'))
+                            origin=self.headers.get('Origin')
+                            if (self.headers.get('Content-Type') != 'application/json' or not 1 <= length <= 1024
+                                    or (origin and origin != 'http://' + self.headers.get('Host',''))):
+                                raise ValueError()
+                            event=observation(json.loads(self.rfile.read(length)))
+                            if adapter.sink and adapter.sink(event) is False: adapter.failed=True
+                            return self.finish_response(204,b'',[],record=False)
                         length=int(self.headers.get('Content-Length','0'))
                         ctype=self.headers.get('Content-Type','').split(';',1)[0].lower()
                         upload=ctype in ('multipart/form-data','application/octet-stream')
@@ -100,23 +115,36 @@ class CustomProcessAdapter(PlatformAdapter):
                         if len(body)>2097152:raise ValueError()
                         status=response.status
                         headers=[(key,value) for key,value in response.getheaders() if key.lower() in ('content-type','set-cookie','location')]
+                        if (self.command == 'GET' and status == 200 and any(
+                                key.lower() == 'content-type' and value.lower().startswith('text/html')
+                                for key,value in headers)):
+                            script=b'<script src="/honeyprint-interactions.js" defer></script>'
+                            if not re.search(br'honeyprint-interactions\.js',body,re.I):
+                                body=re.sub(br'</body\s*>',lambda match: script+match.group(),body,count=1,flags=re.I)
+                                if script not in body: body+=script
                     except OverflowError:
                         status=413;body=b'{"error":"request too large"}';self.close_connection=True
-                    except Exception:status=502;body=b'{"error":"custom backend request failed"}'
+                    except ValueError:
+                        status=400;body=b'{"error":"invalid request"}';headers=[]
+                    except Exception:status=502;body=b'{"error":"custom backend request failed"}';headers=[]
                     finally:
                         if connection:connection.close()
+                    self.finish_response(status,body,headers)
+                def finish_response(self,status,body,headers,*,record=True):
                     self.send_response(status)
                     for key,value in headers:self.send_header(key,value)
                     self.send_header('Content-Length',str(len(body)));self.end_headers()
                     try:self.wfile.write(body)
                     finally:
-                        if adapter.sink:
+                        if record and adapter.sink:
                             try:
                                 accepted=adapter.sink({'source':'custom','event_type':'http.request','action':self.command,
-                                                      'outcome':'observed','simulation':adapter.owned_platform_resources,'metadata':{'route':'root' if self.path=='/' else 'other','status':status}})
+                                                      'outcome':'observed','simulation':adapter.owned_platform_resources,
+                                                      'metadata':{'route':'root' if self.path=='/' else self.path.split('?',1)[0],
+                                                                  'status':status}})
                                 if accepted is False:adapter.failed=True
                             except Exception:adapter.failed=True
-            self.server=HTTPServer(('127.0.0.1',self.front_port),Handler)
+            self.server=type('QuietHTTPServer',(QuietHandlingMixin,HTTPServer),{})(('127.0.0.1',self.front_port),Handler)
             deadline=time.monotonic()+30
             while time.monotonic()<deadline:
                 if self.health(self)['ready']:return self
