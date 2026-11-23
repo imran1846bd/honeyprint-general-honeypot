@@ -22,15 +22,46 @@ HoneyPrint uses one `.env` file to select the honeypot. Choose OctoPrint, Klippe
 
 One platform runs at a time in this flow. Changing `.env` takes effect after a restart; it does not replace a running instance automatically.
 
-## Quick start
+## Download and run on macOS
 
-Use Python 3.11 through 3.13 on macOS or Linux for the bundled ML model and local OctoPrint source. `./run.sh` selects an available supported Python automatically, even when `python3` points to a newer incompatible version. If none is installed, install Python 3.13 or set `HONEYPRINT_PYTHON` to a compatible interpreter path. An existing `.venv` made with an incompatible Python is saved under `.honeyprint/` and rebuilt. Selecting OctoPrint Main or Klipper also requires Docker to be installed and running. On a fresh clone, `./run.sh` copies `.env.example` to a private `.env` automatically. You can also copy it yourself before editing settings:
+Follow these steps from a **new GitHub ZIP download**. Run the commands inside the extracted project folder, not inside the original developer folder.
+
+### 1. Download the project
+
+Open [the HoneyPrint GitHub repository](https://github.com/imran1846bd/honeyprint-general-honeypot), choose **Code → Download ZIP**, extract it, and place the resulting `honeyprint-general-honeypot-main` folder on your Desktop. Open Terminal:
 
 ```bash
-cp .env.example .env
+cd "$HOME/Desktop/honeyprint-general-honeypot-main"
+ls run.sh .env.example
 ```
 
-Set the following values in `.env`:
+If you extracted it elsewhere, change the `cd` path to that folder. To use Git instead of a ZIP, run:
+
+```bash
+cd "$HOME/Desktop"
+git clone https://github.com/imran1846bd/honeyprint-general-honeypot.git
+cd honeyprint-general-honeypot
+```
+
+### 2. Check the prerequisites
+
+- Install Python **3.11, 3.12 or 3.13**. Python 3.13 is recommended for this project. The launcher chooses an installed supported version automatically even if `python3` points to Python 3.15. If no supported version exists, it stops with a clear message. Check for Python 3.13 with `python3.13 --version`.
+- Internet access is needed on the first run to install pinned Python packages and prepare the selected platform. A first build may take several minutes.
+- Docker is required **only** when selecting `klipper` or `octoprint-main`. Start Docker before those selections; `docker info` should succeed. The default native OctoPrint selection does not require Docker.
+- Run `./run.sh` to install the required packages. You do not need to run `pip install -r requirements.txt` manually.
+
+If you previously tried the project with Python 3.15, the current launcher saves that incompatible `.venv` inside `.honeyprint/` and builds a new one with a supported Python. An incomplete OctoPrint source installation is rebuilt automatically. Your `.env` and saved evidence are preserved.
+
+### 3. Select one honeypot in `.env`
+
+The launcher creates `.env` from `.env.example` on first run. To edit settings before starting, create it without overwriting an existing file and open it in TextEdit:
+
+```bash
+[ -f .env ] || cp .env.example .env
+open -e .env
+```
+
+For the default OctoPrint run, keep these values:
 
 ```dotenv
 HONEYPRINT_PLATFORM=octoprint
@@ -40,15 +71,56 @@ HONEYPRINT_ANALYST_ENABLED=true
 HONEYPRINT_DASHBOARD_PORT=8090
 ```
 
-Start the selected honeypot:
+Set `HONEYPRINT_PLATFORM=klipper` for Mainsail/Klipper, `octoprint-main` for the bundled simulator, or `custom` for the custom lab. Each selection uses the same `HONEYPRINT_PORT` but a different interface. The common file is `.env`; edit `configs/platforms/octoprint.yaml`, `klipper.yaml` or `custom.yaml` only for platform-specific options. Save the file before starting. Do not run `source .env`: the launcher reads it as literal settings.
+
+SSH, Telnet and MQTT are **off by default**. To enable one, change its `HONEYPRINT_*_ENABLED` value in `.env` to `true`. Their default ports are 2223, 2323 and 1884, respectively. The analyst dashboard is on by default.
+
+### 4. Start and open the interfaces
+
+From the folder containing `run.sh`, run:
 
 ```bash
 ./run.sh
 ```
 
+Wait until Terminal prints **`Local services ready`**. Keep that Terminal window open; Ctrl-C stops the honeypot. If Terminal says `Permission denied`, run `chmod +x run.sh` and try again.
+
+| Interface | Default address | When available |
+| --- | --- | --- |
+| Selected honeypot | `http://127.0.0.1:8084` | After readiness; uses the selected platform's UI |
+| Analyst dashboard | `http://127.0.0.1:8090` | When `HONEYPRINT_ANALYST_ENABLED=true` |
+| SSH console | `ssh -p 2223 admin@127.0.0.1` | When `HONEYPRINT_SSH_ENABLED=true` |
+| Telnet console | `telnet 127.0.0.1 2323` | When `HONEYPRINT_TELNET_ENABLED=true` |
+| MQTT broker | `127.0.0.1:1884` | When `HONEYPRINT_MQTT_ENABLED=true` |
+
+The managed OctoPrint research login is `admin` / `admin` unless you changed its credentials. For console commands and MQTT topics, see [commands.md](commands.md). The analyst dashboard shows captured events; its address is separate from the honeypot UI.
+
+### 5. Stop, switch or restart
+
+Press **Ctrl-C** in the running Terminal and wait for `Stopped cleanly`. Edit `.env`, save it, then run `./run.sh` again. Configuration changes are read at startup, not while a honeypot is running. Run only one selected platform on the common port at a time.
+
+If the original Terminal window is gone and the launcher says `This runtime is already running`, request a graceful stop from a new Terminal in the project folder:
+
+```bash
+./.venv/bin/python main.py stop --runtime-dir .honeyprint/quickstart
+```
+
+Wait for shutdown before starting again. If you changed `HONEYPRINT_RUNTIME_DIR`, use that value in the stop command. Uploaded G-code and evidence stay in the runtime directory across normal restarts; a fresh ZIP extraction starts with fresh runtime data unless you move those local files yourself.
+
+### 6. Find logs and handle common startup errors
+
+With the default runtime directory, raw interaction evidence is in `.honeyprint/quickstart/events.sqlite3`, analysis and ML results are in `.honeyprint/quickstart/analysis.sqlite3`, and the dashboard is at port 8090. The launcher also prints these paths after readiness.
+
+- **Python 3.15 / incompatible OctoPrint:** use the current GitHub download and ensure Python 3.11–3.13 is installed. The current launcher picks a compatible interpreter and replaces only generated, incompatible environments.
+- **Port already in use:** stop the earlier HoneyPrint run. If a different app owns the port, change `HONEYPRINT_PORT` or `HONEYPRINT_DASHBOARD_PORT` in `.env`, save, and restart. The printed URL changes with the port.
+- **Klipper or OctoPrint Main build fails:** verify Docker is running with `docker info`, then retry `./run.sh`.
+- **Dashboard does not open:** check that `.env` has `HONEYPRINT_ANALYST_ENABLED=true`, wait for the readiness message, and use the printed dashboard URL.
+
+For a short verification that stops automatically after readiness, run `./run.sh --duration 5`. This starts the selected services, keeps them ready for five seconds, then closes them cleanly.
+
 ### What a GitHub clone contains
 
-The Git package is prepared to include the framework code, platform configuration, the OctoPrint and Klipper source under `plat/`, and the reviewed v9 model under `models/`. It excludes your `.env`, uploaded files, evidence databases, installed Python environments, Docker images, build caches, and the framework's local test suite. The first run creates `.env` from `.env.example`, installs dependencies, prepares the selected platform, and creates fresh runtime storage in `.honeyprint/`. Internet access is needed for the initial dependency and frontend downloads. Use Ctrl-C to stop the services; the next `./run.sh` reuses prepared local dependencies.
+The Git package includes the framework code, platform configuration, the OctoPrint and Klipper source under `plat/`, and the reviewed v9 model under `models/`. It excludes your `.env`, uploaded files, evidence databases, installed Python environments, Docker images, build caches, and the framework's local test suite. The first run creates `.env` from `.env.example`, installs dependencies, prepares the selected platform, and creates fresh runtime storage in `.honeyprint/`. Internet access is needed for the initial dependency and frontend downloads. Use Ctrl-C to stop the services; the next `./run.sh` reuses prepared local dependencies.
 
 The default template selects OctoPrint at `http://127.0.0.1:8084` and the analyst dashboard at `http://127.0.0.1:8090`. Optional SSH, Telnet and MQTT listeners use ports 2223, 2323 and 1884 when enabled. To use Klipper, set `HONEYPRINT_PLATFORM=klipper` in `.env` and ensure Docker is running. To use your own custom backend, select `custom` and configure `configs/platforms/custom.yaml`. Runtime logs remain local and are never part of the GitHub package.
 
@@ -460,17 +532,7 @@ honeyprint-general-honeypot/
 
 This is an overview of the main directories; generated `.honeyprint/`, `.venv/` and the private `.env` are excluded from Git.
 
-## Run from a fresh clone
-
-```bash
-git clone https://github.com/imran1846bd/honeyprint-general-honeypot.git
-cd honeyprint-general-honeypot
-./run.sh
-```
-
-The launcher creates a private `.env` from `.env.example` if needed, installs its pinned Python dependencies and prepares the selected platform. The default selection is OctoPrint on `http://127.0.0.1:8084`; the analyst dashboard is on `http://127.0.0.1:8090`. Keep the terminal open while the honeypot runs, and press Ctrl-C to stop it. Edit `.env` and restart to switch platforms or ports. The GitHub package excludes the framework's local test suite.
-
-### Advanced direct core launch
+## Advanced direct core launch
 
 For custom integrations, `main.py` accepts explicit YAML rather than the `.env` quickstart flow. Validate before launching and use the same runtime directory when stopping:
 
