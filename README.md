@@ -24,7 +24,7 @@ One platform runs at a time in this flow. Changing `.env` takes effect after a r
 
 ## Quick start
 
-Use Python 3.11 through 3.13 on macOS or Linux for the bundled ML model. Selecting OctoPrint Main or Klipper also requires Docker to be installed and running. On a fresh clone, `./run.sh` copies `.env.example` to a private `.env` automatically. You can also copy it yourself before editing settings:
+Use Python 3.11 through 3.13 on macOS or Linux for the bundled ML model and local OctoPrint source. `./run.sh` selects an available supported Python automatically, even when `python3` points to a newer incompatible version. If none is installed, install Python 3.13 or set `HONEYPRINT_PYTHON` to a compatible interpreter path. An existing `.venv` made with an incompatible Python is saved under `.honeyprint/` and rebuilt. Selecting OctoPrint Main or Klipper also requires Docker to be installed and running. On a fresh clone, `./run.sh` copies `.env.example` to a private `.env` automatically. You can also copy it yourself before editing settings:
 
 ```bash
 cp .env.example .env
