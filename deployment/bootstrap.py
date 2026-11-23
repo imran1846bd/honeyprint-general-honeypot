@@ -49,7 +49,8 @@ def install_selected(config, octoprint_python=None, *, octoprint_source=None, kl
             state = ROOT / '.honeyprint/buildx'
             state.mkdir(parents=True, exist_ok=True)
             environment = dict(os.environ, BUILDX_CONFIG=str(state))
-            subprocess.run(['docker', 'build', '-t', 'honeyprint-klipper:1',
+            from deployment.klipper_environment import recipe_sha256
+            subprocess.run(['docker', 'build', '--build-arg', 'HONEYPRINT_RECIPE_SHA256=' + recipe_sha256(), '-t', 'honeyprint-klipper:1',
                             str(ROOT / 'deployment/docker/klipper')], env=environment, check=True)
             KlipperEnvironment.prepare()
     if any(item.get("frontend") == "mainsail" for item in config["instances"]):

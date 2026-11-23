@@ -15,7 +15,8 @@ NUMBERS = {
     'ready_timeout_seconds': (30.0, 0.1, 3600),
     'health_interval_seconds': (1.0, 0.01, 60),
     'shutdown_timeout_seconds': (60.0, 0.1, 3600),
-    'event_queue_capacity': (1024, 1, 1000000),
+    # Large enough for bursts (G-code streamed during a print); a full queue stops the run to avoid silent evidence loss.
+    'event_queue_capacity': (65536, 1, 1000000),
     'collector_batch_size': (100, 1, 1000),
     'collector_max_batches': (100, 1, 100000),
     'collector_interval_seconds': (0.2, 0.01, 60),

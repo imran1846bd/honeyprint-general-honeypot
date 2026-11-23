@@ -144,6 +144,10 @@ class OctoPrintEnvironment:
             )
             source = Path(__file__).resolve().parents[1] / 'adapters/octoprint/audit_plugin.py'
             shutil.copyfile(source, self.root / 'plugins/honeyprint_audit.py')
+            assets = self.root / 'plugins/static/js'
+            assets.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source.with_name('controls.js'), assets / 'controls.js')
+            shutil.copyfile(source.parents[2] / 'telemetry/ui_capture.js', assets / 'ui_capture.js')
             result = subprocess.run([str(self.python), '-c', _BOOTSTRAP],
                                     input=json.dumps({'root': str(self.root), 'username': credentials['username'], 'password': credentials['password']}),
                                     text=True, capture_output=True, check=True, timeout=30)

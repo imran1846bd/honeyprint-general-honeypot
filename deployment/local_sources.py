@@ -96,7 +96,7 @@ def prepare_sources(platforms, octoprint_source, klipper_source, python=None):
                     subprocess.run(['git', '-c', 'core.autocrlf=false', *args], cwd=source, env=git_env,
                                    check=True, capture_output=True)
             revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
-            from deployment.klipper_environment import PINS, KlipperEnvironment
+            from deployment.klipper_environment import PINS, KlipperEnvironment, recipe_sha256
             PINS['klipper'] = revision
             os.environ['_HONEYPRINT_KLIPPER_REV'] = revision
             os.environ['_HONEYPRINT_KLIPPER_SOURCE_SHA256'] = digest
@@ -115,13 +115,15 @@ def prepare_sources(platforms, octoprint_source, klipper_source, python=None):
                 result = []
                 for line in dockerfile:
                     if line.startswith('RUN git init /opt/klipper'):
+                        build_firmware = line.split(" && printf ", 1)[1]
                         result += ['COPY source /opt/klipper',
-                                   "RUN cd /opt/klipper && printf 'CONFIG_MACH_AVR=y\\nCONFIG_MACH_atmega644p=y\\nCONFIG_LOW_LEVEL_OPTIONS=y\\nCONFIG_SIMULAVR=y\\n' > .config && make olddefconfig && make -j2"]
+                                   'RUN cd /opt/klipper && printf ' + build_firmware]
                     else: result.append(line)
                 result.append('LABEL org.honeyprint.klipper.source.sha256=' + digest)
                 (context / 'Dockerfile').write_text('\n'.join(result) + '\n')
                 state = ROOT / '.honeyprint/buildx'; state.mkdir(parents=True, exist_ok=True)
-                subprocess.run(['docker', 'build', '--build-arg', 'KLIPPER_REV=' + revision, '-t', image,
+                subprocess.run(['docker', 'build', '--build-arg', 'KLIPPER_REV=' + revision,
+                                '--build-arg', 'HONEYPRINT_RECIPE_SHA256=' + recipe_sha256(), '-t', image,
                                 str(context)], env=dict(os.environ, BUILDX_CONFIG=str(state)), check=True)
                 KlipperEnvironment.prepare()
         return python

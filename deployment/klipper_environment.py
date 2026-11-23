@@ -1,7 +1,10 @@
 """Owned, isolated upstream Klipper containers; no host devices or socket mounts."""
 import json
+import hashlib
 import os
+from pathlib import Path
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from adapters.base_adapter import AdapterError
@@ -10,7 +13,15 @@ IMAGE = 'honeyprint-klipper:1'
 PINS = {'klipper': os.environ.get('_HONEYPRINT_KLIPPER_REV', 'e2b99a9159f992169c1ba53029dec020e850cc99'),
         'moonraker': '9e676eba6b02661a4dfa3ec6e7ac3f3504498e6d',
         'simulavr': '32985f745c237bf8dcd2718235d01c8b1fb0491d'}
-CONFIG_SCHEMA = '2'
+CONFIG_SCHEMA = '4'
+
+
+def recipe_sha256():
+    folder = Path(__file__).resolve().parent / 'docker/klipper'
+    digest = hashlib.sha256()
+    for name in ('Dockerfile', 'avr_bridge.py', 'entrypoint.py', 'patch_cancel.py', 'settings.py'):
+        digest.update(name.encode() + b'\0' + (folder / name).read_bytes())
+    return digest.hexdigest()
 
 
 def docker(*args, timeout=30):
@@ -43,6 +54,8 @@ class KlipperEnvironment:
             raise AdapterError('Klipper image does not match the selected local source snapshot')
         if labels.get('org.honeyprint.klipper.config.schema') != CONFIG_SCHEMA:
             raise AdapterError('Klipper image lacks the current configuration schema')
+        if labels.get('org.honeyprint.klipper.recipe.sha256') != recipe_sha256():
+            raise AdapterError('Klipper image does not match the current simulator recipe')
         if info['Config']['User'] != '10001:10001':
             raise AdapterError('Klipper image must use the unprivileged runtime account')
         token = uuid.uuid4().hex
@@ -59,7 +72,7 @@ class KlipperEnvironment:
             docker('run', '--detach', '--name', self.name, '--network', self.network,
                    '--label', 'org.honeyprint.owner=' + self.token,
                    '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-                   '--pids-limit=128', '--memory=1g', '--cpus=2',
+                   '--pids-limit=128', '--memory=1g', '--cpus=4',  # emulated MCU + Klipper + Moonraker; 2 starved the heater loop
                    '--log-opt=max-size=10m', '--log-opt=max-file=3',
                    '--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,uid=10001,gid=10001,mode=0700',
                    '--tmpfs=/data:rw,nosuid,nodev,noexec,size=256m,uid=10001,gid=10001,mode=0700',
@@ -86,10 +99,28 @@ class KlipperEnvironment:
         code = ('import json,urllib.request; '
                 'r=urllib.request.urlopen(' + repr('http://127.0.0.1:7125' + path) + ',timeout=3); '
                 'print(r.read(1048577).decode())')
-        raw = docker('exec', self.name, '/opt/moonraker-env/bin/python', '-c', code, timeout=8)
+        command = ('exec', self.name, '/opt/moonraker-env/bin/python', '-c', code)
+        try:
+            raw = docker(*command, timeout=4.5)
+        except AdapterError:
+            # A brief Docker/Moonraker read failure is recoverable. Keep the
+            # total budget shorter than the observer's shutdown join timeout.
+            time.sleep(0.15)
+            raw = docker(*command, timeout=4.5)
         if len(raw) > 1048576:
             raise AdapterError('Moonraker response exceeds the observation limit')
         return json.loads(raw)['result']
+
+    def reset_mcu(self):
+        """Reset the emulated AVR board (the container supervisor restarts it on SIGUSR1)."""
+        docker('exec', self.name, '/opt/klippy-env/bin/python', '-c',
+               'import os,signal; os.kill(1, signal.SIGUSR1)', timeout=10)
+
+    def diagnostic_tail(self):
+        if not self.created_container:
+            return ''
+        return docker('exec', self.name, 'sh', '-c',
+                      'tail -n 300 /data/logs/klippy.log; tail -n 40 /data/logs/moonraker.log', timeout=3)
 
     def stop(self):
         for kind, name, flag in (('container', self.name, 'created_container'),

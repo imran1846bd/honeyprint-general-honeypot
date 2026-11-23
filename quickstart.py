@@ -9,6 +9,7 @@ from core.runtime_settings import resolve_settings
 import os
 from pathlib import Path
 import signal
+import secrets
 import socket
 import sqlite3
 import subprocess
@@ -68,6 +69,7 @@ def main(argv=None):
     parser.add_argument('--custom-health-path')
     parser.add_argument('--runtime-dir',type=Path)
     parser.add_argument('--dashboard-port',type=int)
+    parser.add_argument('--model-zip',type=Path,help='Trusted local advisory model archive')
     parser.add_argument('--octoprint-python',type=Path)
     parser.add_argument('--octoprint-source',type=Path)
     parser.add_argument('--klipper-source',type=Path)
@@ -80,11 +82,12 @@ def main(argv=None):
     try:
         if args.config is None:
             from deployment.env_config import read_env, build_config
+            values = read_env(args.env_file)
             folder=ROOT/'.honeyprint/launch';folder.mkdir(parents=True,exist_ok=True,mode=0o700)
             generated=tempfile.TemporaryDirectory(prefix='env-',dir=folder)
-            selected=build_config(read_env(args.env_file),args.env_file.absolute().parent,Path(generated.name))
+            selected=build_config(values,args.env_file.absolute().parent,Path(generated.name))
             args.config=selected['config_path']
-            for field in ('runtime_dir','dashboard_port','octoprint_python','custom_code','custom_python','custom_health_path','octoprint_source','klipper_source','custom_api_url','analyst_enabled'):
+            for field in ('runtime_dir','dashboard_port','model_zip','octoprint_python','custom_code','custom_python','custom_health_path','octoprint_source','klipper_source','custom_api_url','analyst_enabled'):
                 if getattr(args,field) is None:setattr(args,field,selected[field])
         if args.analyst_enabled is None:args.analyst_enabled=True
         ssh_enabled=selected['ssh_enabled'] if selected else False
@@ -100,7 +103,7 @@ def main(argv=None):
         args.dashboard_port=args.dashboard_port or 8090
         args.custom_health_path=args.custom_health_path or '/'
         if not 1 <= args.dashboard_port <= 65535:raise ValueError('Invalid dashboard port')
-    except (OSError,ValueError,RuntimeError) as error:
+    except (OSError,ValueError,RuntimeError,subprocess.CalledProcessError) as error:
         if generated:generated.cleanup()
         parser.error(str(error))
     if args.duration is not None and (not math.isfinite(args.duration) or not 0 < args.duration <= 86400): parser.error('Invalid duration')
@@ -113,10 +116,12 @@ def main(argv=None):
         config=load_config(args.config)
         settings=resolve_settings(config.get('runtime', {}))
         if args.duration is None: args.duration=settings['run_duration_seconds'] or None
-        from core.builtin_registry import create_builtin_registry
-        from core.validator import validate_config
-        validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
-                           custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url, runtime_settings=settings))
+        main_variant = bool(selected and config['instances'][0]['platform'] == 'octoprint-main')
+        if not main_variant:
+            from core.builtin_registry import create_builtin_registry
+            from core.validator import validate_config
+            validate_config(config, create_builtin_registry(runtime_dir=args.runtime_dir, octoprint_python=args.octoprint_python,
+                               custom_code=args.custom_code, custom_python=args.custom_python, custom_health_path=args.custom_health_path, custom_api_url=args.custom_api_url, runtime_settings=settings))
         # Diagnose a second launch before dependency preparation or child startup.
         import fcntl
         runtime_lock = args.runtime_dir / 'control.lock'
@@ -136,9 +141,15 @@ def main(argv=None):
                         raise RuntimeError(f'Honeypot port {web_port} is already in use. Stop the previous run or change HONEYPRINT_PORT') from None
         if args.no_bootstrap and (args.octoprint_source or args.klipper_source):
             raise ValueError('Local sources require bootstrap to verify their builds')
-        if not args.no_bootstrap:
+        if main_variant and not args.no_bootstrap:
+            from deployment.octoprint_main import prepare_image
+            prepare_image()
+        if not args.no_bootstrap and not main_variant:
             from deployment.bootstrap import install_selected
             args.octoprint_python = install_selected(config, args.octoprint_python, octoprint_source=args.octoprint_source, klipper_source=args.klipper_source)
+        child_env = os.environ.copy()
+        if main_variant:
+            child_env['HONEYPRINT_MAIN_API_KEY'] = secrets.token_hex(32)
         expected={instance['id'] for instance in config['instances']}
         if not expected:raise ValueError('No configured instances')
         if args.analyst_enabled and any(args.dashboard_port in instance['services'].values() for instance in config['instances']):
@@ -193,7 +204,10 @@ def main(argv=None):
         if args.custom_api_url:command+=['--custom-api-url',args.custom_api_url]
         if args.custom_python:command+=['--custom-python',str(args.custom_python.absolute())]
         command+=['--custom-health-path',args.custom_health_path]
-        children.append(subprocess.Popen(command,cwd=ROOT,start_new_session=True))
+        if main_variant:
+            command = [sys.executable, '-m', 'deployment.octoprint_main',
+                       str(args.config), str(runtime)]
+        children.append(subprocess.Popen(command,cwd=ROOT,env=child_env,start_new_session=True))
         deadline=time.monotonic()+settings['startup_timeout_seconds']
         while not runtime_ready(database,baseline,expected,timeout=settings['sqlite_busy_timeout_seconds']):
             if stopping.wait(0.1):return 0
@@ -203,11 +217,11 @@ def main(argv=None):
             instance=config['instances'][0]
             control_args=(['--control-port',str(instance['services']['web_port']),
                            '--runtime-dir',str(runtime)]
-                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','klipper','custom_lab')
+                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','octoprint-main','klipper','custom_lab')
                           and instance['simulation'] in ('virtual_printer','avr_sim','lab_sim') else [])
             ssh_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-ssh-')
             ssh_ready=Path(ssh_ready_directory.name)/'ready'
-            ssh_env=os.environ.copy()
+            ssh_env=child_env.copy()
             ssh_env['HONEYPRINT_SSH_USERNAME']=selected['ssh_username']
             ssh_env['HONEYPRINT_SSH_PASSWORD']=selected['ssh_password']
             ssh_command=[sys.executable,'-m','services.ssh_decoy',
@@ -224,11 +238,11 @@ def main(argv=None):
             instance=config['instances'][0]
             control_args=(['--control-port',str(instance['services']['web_port']),
                            '--runtime-dir',str(runtime)]
-                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','klipper','custom_lab')
+                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','octoprint-main','klipper','custom_lab')
                           and instance['simulation'] in ('virtual_printer','avr_sim','lab_sim') else [])
             telnet_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-telnet-')
             telnet_ready=Path(telnet_ready_directory.name)/'ready'
-            telnet_env=os.environ.copy()
+            telnet_env=child_env.copy()
             telnet_env['HONEYPRINT_TELNET_USERNAME']=selected['telnet_username']
             telnet_env['HONEYPRINT_TELNET_PASSWORD']=selected['telnet_password']
             telnet_command=[sys.executable,'-m','services.telnet_decoy',
@@ -245,11 +259,11 @@ def main(argv=None):
             instance=config['instances'][0]
             control_args=(['--control-port',str(instance['services']['web_port']),
                            '--runtime-dir',str(runtime)]
-                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','klipper','custom_lab')
+                          if instance['deployment']=='managed' and instance['platform'] in ('octoprint','octoprint-main','klipper','custom_lab')
                           and instance['simulation'] in ('virtual_printer','avr_sim','lab_sim') else [])
             mqtt_ready_directory=tempfile.TemporaryDirectory(prefix='honeyprint-mqtt-')
             mqtt_ready=Path(mqtt_ready_directory.name)/'ready'
-            mqtt_env=os.environ.copy()
+            mqtt_env=child_env.copy()
             mqtt_env['HONEYPRINT_MQTT_USERNAME']=selected['mqtt_username']
             mqtt_env['HONEYPRINT_MQTT_PASSWORD']=selected['mqtt_password']
             mqtt_command=[sys.executable,'-m','services.mqtt_decoy',
@@ -270,12 +284,27 @@ def main(argv=None):
                 '--alerts',str(alerts),'--watch','--interval',str(settings['analysis_interval_seconds']),
                 '--batch-size',str(settings['analysis_batch_size']),
                 '--sqlite-timeout',str(settings['sqlite_busy_timeout_seconds'])],cwd=ROOT,start_new_session=True))
+        if args.model_zip:
+            try:
+                import catboost, joblib, pandas
+            except ImportError:
+                print('Installing pinned optional ML dependencies',flush=True)
+                subprocess.run([sys.executable,'-m','pip','install','-r',str(ROOT/'requirements-ml.txt')],check=True)
+            from telemetry.analysis.ml_service import load_model, open_store
+            _, _, model_id = load_model(args.model_zip)
+            with closing(open_store(alerts)) as prediction_store:
+                with prediction_store:
+                    prediction_store.execute('DELETE FROM ml_predictions WHERE model_id != ?', (model_id,))
+            children.append(subprocess.Popen([sys.executable,'-m','telemetry.analysis.ml_service',
+                '--database',str(database),'--predictions',str(alerts),
+                '--model-zip',str(args.model_zip)],cwd=ROOT,start_new_session=True))
         if args.analyst_enabled:
             dashboard_command=[sys.executable,'-m','dashboard.server','--database',str(database),
                 '--port',str(args.dashboard_port),'--page-size',str(settings['dashboard_page_size']),
                 '--request-timeout',str(settings['dashboard_request_timeout_seconds']),
                 '--sqlite-timeout',str(settings['sqlite_busy_timeout_seconds'])]
             if settings['analysis_enabled']: dashboard_command += ['--alerts',str(alerts)]
+            if args.model_zip: dashboard_command += ['--predictions',str(alerts)]
             children.append(subprocess.Popen(dashboard_command,cwd=ROOT,start_new_session=True))
             deadline=time.monotonic()+settings['dashboard_startup_timeout_seconds']
             while True:
@@ -295,6 +324,7 @@ def main(argv=None):
         if telnet_enabled:print(f'Telnet decoy: telnet 127.0.0.1 {telnet_port}',flush=True)
         if mqtt_enabled:print(f'MQTT decoy: 127.0.0.1:{mqtt_port}, topic honeyprint/{instance["id"]}/#',flush=True)
         if args.analyst_enabled:print(f'Analyst dashboard: http://127.0.0.1:{args.dashboard_port} (port {args.dashboard_port})',flush=True)
+        if args.model_zip:print('Advisory ML classification enabled; low-confidence and candidate results require review.',flush=True)
         started=time.monotonic()
         while not stopping.wait(0.2):
             if children[0].poll() == 0:break  # Explicit framework stop also closes companion services.

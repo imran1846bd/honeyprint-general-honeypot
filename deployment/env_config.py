@@ -21,6 +21,7 @@ KEYS |= {'HONEYPRINT_TELNET_ENABLED', 'HONEYPRINT_TELNET_HOST', 'HONEYPRINT_TELN
 KEYS |= {'HONEYPRINT_MQTT_ENABLED', 'HONEYPRINT_MQTT_HOST', 'HONEYPRINT_MQTT_PORT',
          'HONEYPRINT_MQTT_USERNAME', 'HONEYPRINT_MQTT_PASSWORD'}
 KEYS |= {'HONEYPRINT_CAPTURE_REQUESTS', 'HONEYPRINT_CAPTURE_COMMANDS', 'HONEYPRINT_CAPTURE_STATE_CHANGES'}
+KEYS.add('HONEYPRINT_ML_MODEL_ZIP')
 
 
 def read_env(path):
@@ -63,10 +64,10 @@ def build_config(values,base,output):
         if value is None:return None
         p=Path(value).expanduser();return p.absolute() if p.is_absolute() else (base/p).absolute()
     platform=values.get('HONEYPRINT_PLATFORM','octoprint').strip().lower()
-    names={'octoprint':'octoprint','klipper':'klipper','custom':'custom'}
-    if platform not in (*names,'all'):raise ValueError('HONEYPRINT_PLATFORM must be all, octoprint, klipper or custom')
+    names={'octoprint':'octoprint','octoprint-main':'octoprint','klipper':'klipper','custom':'custom'}
+    if platform not in (*names,'all'):raise ValueError('HONEYPRINT_PLATFORM must be all, octoprint, octoprint-main, klipper or custom')
     from deployment.platform_config import load_platform_settings
-    platform_values = load_platform_settings(platform, base)
+    platform_values = {} if platform == 'octoprint-main' else load_platform_settings(platform, base)
     # Legacy explicitly supplied env keys remain compatible, but are absent from the common template.
     values = {**platform_values, **values}
     settings = settings_from_env(values)
@@ -134,7 +135,9 @@ def build_config(values,base,output):
         raise ValueError('HONEYPRINT_MQTT_PASSWORD must be 1..128 printable characters')
     for instance in config['instances']:
         instance['printer_profile']=str(profile_path.absolute())
-        if instance['platform'] == 'octoprint':
+        if platform == 'octoprint-main':
+            instance.update(platform='octoprint-main', id='octo_main_01')
+        elif instance['platform'] == 'octoprint':
             instance['octoprint_settings'] = platform_values['_octoprint_settings']
         elif instance['platform'] == 'klipper':
             instance['klipper_settings'] = platform_values['_klipper_settings']
@@ -158,6 +161,7 @@ def build_config(values,base,output):
     return {'config':config,'config_path':config_path,
             'runtime_dir':path('HONEYPRINT_RUNTIME_DIR',str(ROOT/'.honeyprint/quickstart')),
             'dashboard_port':port(values.get('HONEYPRINT_DASHBOARD_PORT'),8090),
+            'model_zip':path('HONEYPRINT_ML_MODEL_ZIP'),
             'octoprint_python':path('HONEYPRINT_OCTOPRINT_PYTHON'),
             'octoprint_source':path('HONEYPRINT_OCTOPRINT_SOURCE') if platform in ('all','octoprint') else None,
             'klipper_source':path('HONEYPRINT_KLIPPER_SOURCE') if platform in ('all','klipper') else None,
