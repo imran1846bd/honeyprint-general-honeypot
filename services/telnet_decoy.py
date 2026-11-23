@@ -9,9 +9,12 @@ import socket
 import threading
 from uuid import uuid4
 
+from services.probe_log import CountingSocket, probe
 from telemetry.normalizer import normalize_event
 from telemetry.sqlite_storage import SQLiteStorage
 from services.printer_control import PrinterControl, ControlError, FILENAME, MAX_UPLOAD
+from core.gcode_files import safe_label
+from services.command_features import command_features
 
 
 IAC = 255
@@ -23,7 +26,7 @@ def command_metadata(command):
     name = command.strip().split(' ', 1)[0][:64]
     if not name or any(not (c.isalnum() or c in '._/-?') for c in name):
         name = '[other]'
-    return {'command': name, 'length': len(command)}
+    return {'command': name, 'length': len(command), **command_features(command)}
 
 
 def response(command, control=None):
@@ -144,6 +147,8 @@ def serve(host, port, username, password, database, instance_id, platform, ready
         def handle(client, peer):
             session_id = str(uuid4())
             opened = False
+            attempted = False
+            client = CountingSocket(client)
             line_state = {'skip_lf': False}
             try:
                 client.settimeout(30)
@@ -164,6 +169,7 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                     accepted = not (over_user or over_password) and (
                         hmac.compare_digest(candidate, username)
                         and hmac.compare_digest(secret, password))
+                    attempted = True
                     emit('telnet.auth', 'password', 'accepted' if accepted else 'rejected',
                          session_id, {'username': candidate[:64], 'peer': peer[0]})
                     if accepted:
@@ -209,6 +215,8 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                             upload_name = name
                             client.sendall(b'Paste G-code; finish with a single . line\r\n')
                         else:
+                            emit('telnet.upload', 'upload', 'rejected', session_id,
+                                 {'filename': safe_label(name), 'reason': 'Unsupported G-code filename'})
                             client.sendall(b'Use upload NAME.gcode\r\n' + PROMPT)
                         continue
                     reply, should_exit = response(command, control)
@@ -221,6 +229,13 @@ def serve(host, port, username, password, database, instance_id, platform, ready
             finally:
                 if opened:
                     emit('telnet.session', 'close', 'completed', session_id, {'peer': peer[0]})
+                elif not attempted:
+                    # Port scan or service probe: connected without logging in.
+                    outcome, metadata = probe('telnet', port, peer[0], client.received, client.started)
+                    try:
+                        emit('network.connection', 'connect', outcome, session_id, metadata)
+                    except Exception:
+                        pass
                 with active_lock:
                     active.discard(client)
                 client.close()

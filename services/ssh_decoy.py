@@ -12,9 +12,14 @@ from uuid import uuid4
 
 import paramiko
 
+from services.probe_log import CountingSocket, probe
+
+SSH_BANNER = 'SSH-2.0-OpenSSH_8.4p1 Debian-5+deb11u3'
+
 from telemetry.normalizer import normalize_event
 from telemetry.sqlite_storage import SQLiteStorage
 from services.printer_control import PrinterControl, ControlError, FILENAME, MAX_UPLOAD
+from services.command_features import command_features
 
 
 PROMPT = b'printer@honeyprint:~$ '
@@ -26,7 +31,7 @@ def command_metadata(command):
     name = command.strip().split(' ', 1)[0][:64]
     if not name or any(not (c.isalnum() or c in '._/-?') for c in name):
         name = '[other]'
-    return {'command': name, 'length': len(command)}
+    return {'command': name, 'length': len(command), **command_features(command)}
 
 
 def response(command, control=None):
@@ -68,8 +73,10 @@ class DecoySession(paramiko.ServerInterface):
         self.command = None
         self.mode = None
         self.session_id = str(uuid4())
+        self.attempted = False
 
     def check_auth_password(self, username, password):
+        self.attempted = True
         accepted = hmac.compare_digest(username, self.username) and hmac.compare_digest(password, self.password)
         self.emit('ssh.auth', 'password', 'accepted' if accepted else 'rejected',
                   self.session_id, {'username': username[:64], 'peer': self.peer})
@@ -149,9 +156,15 @@ def serve(host, port, username, password, database, instance_id, platform, key_p
 
         def handle(client, peer):
             transport = None
+            session = None
+            opened = False
+            client = CountingSocket(client)
             try:
                 client.settimeout(10)
                 transport = paramiko.Transport(client)
+                # Announce the OpenSSH build of Raspberry Pi OS (OctoPi / MainsailOS hosts),
+                # not "paramiko", which nmap -sV would report as a Python honeypot.
+                transport.local_version = SSH_BANNER
                 with active_lock:
                     active.add(transport)
                 transport.add_server_key(key)
@@ -165,6 +178,7 @@ def serve(host, port, username, password, database, instance_id, platform, key_p
                     if channel is None or not session.request.wait(10):
                         return
                     channel.settimeout(0.5)
+                    opened = True
                     emit('ssh.session', 'open', 'accepted', session.session_id, {'peer': peer[0]})
                     try:
                         if session.mode == 'exec':
@@ -177,7 +191,7 @@ def serve(host, port, username, password, database, instance_id, platform, key_p
                                 deadline = time.monotonic() + 15
                                 try:
                                     if control is None or not FILENAME.fullmatch(name):
-                                        raise ControlError('Use upload NAME.gcode with a local UTF-8 file on stdin')
+                                        raise ControlError('Use upload NAME.gcode with a local G-code file on stdin')
                                     while time.monotonic() < deadline:
                                         try:
                                             chunk = channel.recv(4096)
@@ -268,6 +282,13 @@ def serve(host, port, username, password, database, instance_id, platform, key_p
             except (EOFError, OSError, paramiko.SSHException):
                 pass
             finally:
+                if not opened and not (session and session.attempted):
+                    # Port scan or service probe: connected without logging in.
+                    outcome, metadata = probe('ssh', port, peer[0], client.received, client.started)
+                    try:
+                        emit('network.connection', 'connect', outcome, session.session_id if session else str(uuid4()), metadata)
+                    except Exception:
+                        pass
                 if transport is not None:
                     with active_lock:
                         active.discard(transport)

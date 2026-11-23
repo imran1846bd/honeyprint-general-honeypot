@@ -2,6 +2,7 @@
 import argparse
 import hmac
 import json
+import re
 import os
 from pathlib import Path
 import signal
@@ -10,9 +11,11 @@ import struct
 import threading
 from uuid import uuid4
 
+from services.probe_log import CountingSocket, probe
 from telemetry.normalizer import normalize_event
 from telemetry.sqlite_storage import SQLiteStorage
 from services.printer_control import PrinterControl, ControlError, FILENAME
+from services.command_features import command_features
 
 MAX_PACKET = 65536
 
@@ -140,6 +143,9 @@ def serve(host, port, username, password, database, instance_id, platform, ready
         def handle(client, peer):
             session = str(uuid4())
             connected = False
+            attempted = False
+            raw_client = client
+            client = CountingSocket(client)
             subscriptions = []
             try:
                 client.settimeout(30)
@@ -160,6 +166,7 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                 accepted = (offset == len(body) and len(client_id) <= 128
                             and hmac.compare_digest(candidate, username.encode())
                             and hmac.compare_digest(secret, password.encode()))
+                attempted = True
                 emit('mqtt.auth', 'connect', 'accepted' if accepted else 'rejected', session,
                      {'peer': peer[0], 'client_id_length': len(client_id)})
                 client.sendall(frame(0x20, b'\x00\x00' if accepted else b'\x00\x04'))
@@ -195,7 +202,9 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                             granted.append(0 if valid else 0x80)
                             if valid:
                                 new_patterns.append(pattern)
-                                emit('mqtt.subscribe', 'subscribe', 'accepted', session, {'topic_filter': pattern})
+                            # Rejected filters (e.g. '#', '$SYS/#') are enumeration evidence too.
+                            emit('mqtt.subscribe', 'subscribe', 'accepted' if valid else 'rejected',
+                                 session, {'topic_filter': pattern[:256]})
                         if not granted:
                             raise ValueError('empty subscription')
                         subscriptions.extend(new_patterns)
@@ -261,7 +270,11 @@ def serve(host, port, username, password, database, instance_id, platform, ready
                                     current = state['status']
                                 reply = 'simulated'
                                 outcome = 'simulated'
-                            emit('mqtt.command', verb, outcome, session, {'topic': topic})
+                            first = command.split(' ', 1)[0].lower()
+                            # One safe word for unsupported commands (e.g. 'firmware', 'reboot').
+                            word = first if re.fullmatch(r'[a-z][a-z0-9_-]{0,23}', first) else '[invalid]'
+                            emit('mqtt.command', verb, outcome, session,
+                                 {'topic': topic, 'command': word, **command_features(command)})
                             response = json.dumps({'command': verb, 'printer': current, 'simulated': True,
                                                    'result': reply}, separators=(',', ':')).encode()
                             broadcast(prefix + '/response', response)
@@ -275,8 +288,15 @@ def serve(host, port, username, password, database, instance_id, platform, ready
             finally:
                 if connected:
                     emit('mqtt.session', 'close', 'completed', session, {'peer': peer[0]})
+                elif not attempted:
+                    # Port scan or service probe: connected without an MQTT CONNECT.
+                    outcome, metadata = probe('mqtt', port, peer[0], client.received, client.started)
+                    try:
+                        emit('network.connection', 'connect', outcome, session, metadata)
+                    except Exception:
+                        pass
                 with lock:
-                    clients.discard(client)
+                    clients.discard(raw_client)
                     subscriptions_by_client.pop(client, None)
                     workers.discard(threading.current_thread())
                 client.close()

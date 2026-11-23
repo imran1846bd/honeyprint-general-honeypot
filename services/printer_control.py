@@ -6,15 +6,27 @@ translated to the selected platform's loopback API.
 
 import http.client
 import json
+import os
 from pathlib import Path
+import base64
 import re
 import time
+from urllib.parse import quote
 from uuid import uuid4
+
+from core.gcode_files import valid_gcode_name
 
 
 GCODE = re.compile(r'^(?:G0|G1|G28|G90|G91|M82|M83|M104|M105|M114|M115|M140)\b(?: [A-Za-z][+-]?(?:\d+(?:\.\d*)?|\.\d+))*$', re.I)
 TEMPERATURE = re.compile(r'^(?:0|[1-9][0-9]{0,2})(?:\.[0-9])?$')
-FILENAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.gcode$', re.I)
+class _GcodeName:
+    """FILENAME.fullmatch(name) for the consoles, backed by the shared rule in core/gcode_files.py."""
+    @staticmethod
+    def fullmatch(name):
+        return valid_gcode_name(name)
+
+
+FILENAME = _GcodeName()
 MAX_UPLOAD = 1048576
 
 COMMANDS = (
@@ -50,21 +62,26 @@ class ControlError(Exception):
 
 class PrinterControl:
     def __init__(self, platform, port, runtime_dir=None, instance_id=None):
-        if platform not in ('octoprint', 'klipper', 'custom_lab') or not 1 <= port <= 65535:
+        if platform not in ('octoprint', 'octoprint-main', 'klipper', 'custom_lab') or not 1 <= port <= 65535:
             raise ValueError('Unsupported printer control target')
-        self.platform = platform
+        self.main_variant = platform == 'octoprint-main'
+        self.platform = 'octoprint' if self.main_variant else platform
         self.port = port
         self.credentials = (Path(runtime_dir) / instance_id / 'credentials.json'
                             if platform == 'octoprint' and runtime_dir and instance_id else None)
 
+    def _api_key(self):
+        try:
+            if self.main_variant:
+                return os.environ['HONEYPRINT_MAIN_API_KEY']
+            return json.loads(self.credentials.read_text())['api_key']
+        except (AttributeError, OSError, KeyError, ValueError) as exc:
+            raise ControlError('OctoPrint credentials unavailable') from exc
+
     def _request(self, method, path, body=None):
         headers = {'Content-Type': 'application/json'}
         if self.platform == 'octoprint':
-            try:
-                credentials = json.loads(self.credentials.read_text())
-                headers['X-Api-Key'] = credentials['api_key']
-            except (AttributeError, OSError, KeyError, ValueError) as exc:
-                raise ControlError('OctoPrint credentials unavailable') from exc
+            headers['X-Api-Key'] = self._api_key()
         connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=3)
         try:
             connection.request(method, path, json.dumps(body) if body is not None else None, headers)
@@ -114,7 +131,11 @@ class PrinterControl:
                 'tool': tool.get('actual', 0), 'tool_target': tool.get('target', 0),
                 'bed': bed.get('actual', 0), 'bed_target': bed.get('target', 0),
                 'job': job.get('job', {}).get('file', {}).get('name'),
-                'progress': job.get('progress', {}).get('completion')}
+                'progress': job.get('progress', {}).get('completion'),
+                **({'position': data['position']} if self.main_variant and 'position' in data else {})}
+
+    def _known_filename(self, name):
+        return valid_gcode_name(name)
 
     def files(self):
         if self.platform == 'custom_lab':
@@ -130,40 +151,42 @@ class PrinterControl:
             raise ControlError('Invalid printer file list')
         names = [name for item in records[:20] if isinstance(item, dict)
                  for name in [item.get('name', item.get('path'))]
-                 if isinstance(name, str) and FILENAME.fullmatch(name)]
+                 if isinstance(name, str) and self._known_filename(name)]
         return 'G-code files: ' + (', '.join(names) if names else '(none)')
 
     def upload(self, name, content):
-        if not FILENAME.fullmatch(name):
-            raise ControlError('Use a simple .gcode filename')
-        if not isinstance(content, bytes) or not 1 <= len(content) <= MAX_UPLOAD or b'\0' in content:
-            raise ControlError('G-code file must be 1 byte to 1 MiB of UTF-8 text')
-        try:
-            decoded = content.decode('utf-8')
-        except UnicodeError as exc:
-            raise ControlError('G-code file must be UTF-8 text') from exc
+        if not valid_gcode_name(name):
+            raise ControlError('Use a G-code filename (.gcode, .gco, .g or .nc) without folders')
+        if not isinstance(content, bytes) or not 1 <= len(content) <= MAX_UPLOAD:
+            raise ControlError('G-code file must be 1 byte to 1 MiB')
+        if b'\0' in content:
+            raise ControlError('G-code file must be text, not binary')
         if self.platform == 'custom_lab':
-            self._request('POST', '/api/files', {'name':name, 'gcode':decoded})
+            # Exact bytes: slicer files may hold non-UTF-8 comments.
+            self._request('POST', '/api/files', {'name':name,
+                                                 'gcode_base64':base64.b64encode(content).decode('ascii')})
             return 'Uploaded ' + name
         boundary = 'honeyprint-' + uuid4().hex
         body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{name}"\r\n'
                 'Content-Type: application/octet-stream\r\n\r\n').encode() + content + f'\r\n--{boundary}--\r\n'.encode()
         headers = {'Content-Type': 'multipart/form-data; boundary=' + boundary}
         if self.platform == 'octoprint':
-            try:
-                headers['X-Api-Key'] = json.loads(self.credentials.read_text())['api_key']
-            except (AttributeError, OSError, KeyError, ValueError) as exc:
-                raise ControlError('OctoPrint credentials unavailable') from exc
+            headers['X-Api-Key'] = self._api_key()
         path = '/api/files/local' if self.platform == 'octoprint' else '/server/files/upload'
         connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
         try:
             connection.request('POST', path, body, headers)
             response = connection.getresponse()
-            response.read(65537)
+            payload = response.read(65537)
             if not 200 <= response.status < 300:
                 raise ControlError(f'G-code upload rejected (HTTP {response.status})')
+            if self.main_variant:
+                stored_name = json.loads(payload)['files']['local']['name']
+                if not self._known_filename(stored_name):
+                    raise ControlError('Invalid printer file name')
+                return 'Uploaded ' + stored_name
             return 'Uploaded ' + name
-        except (OSError, http.client.HTTPException) as exc:
+        except (OSError, ValueError, TypeError, KeyError, http.client.HTTPException) as exc:
             raise ControlError('Printer upload API unavailable') from exc
         finally:
             connection.close()
@@ -190,13 +213,13 @@ class PrinterControl:
         return f'Job: {file}\nState: {state}\nProgress: {progress}'
 
     def file_action(self, action, name):
-        if not FILENAME.fullmatch(name):
-            raise ControlError('Use a simple .gcode filename from files')
+        if not self._known_filename(name):
+            raise ControlError('Use a filename from files')
         if action in ('select', 'print'):
             if action == 'select' and self.platform == 'klipper':
                 raise ControlError('Separate file selection is unavailable for Klipper; use print NAME.gcode')
             if self.platform == 'octoprint':
-                self._request('POST', '/api/files/local/' + name,
+                self._request('POST', '/api/files/local/' + quote(name),
                               {'command': 'select', 'print': action == 'print'})
             elif self.platform == 'custom_lab':
                 self._request('POST', '/api/job', {'command':'select','filename':name})
@@ -207,13 +230,10 @@ class PrinterControl:
             return ('File selected: ' if action == 'select' else 'Print requested for ') + name
         path = ('/downloads/files/local/' if self.platform == 'octoprint'
                 else '/api/files/' if self.platform == 'custom_lab'
-                else '/server/files/gcodes/') + name
+                else '/server/files/gcodes/') + quote(name)
         headers = {}
         if self.platform == 'octoprint':
-            try:
-                headers['X-Api-Key'] = json.loads(self.credentials.read_text())['api_key']
-            except (AttributeError, OSError, KeyError, ValueError) as exc:
-                raise ControlError('OctoPrint credentials unavailable') from exc
+            headers['X-Api-Key'] = self._api_key()
         connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=3)
         try:
             connection.request('GET', path, headers=headers)
@@ -273,7 +293,7 @@ class PrinterControl:
             return (f"Printer: {state['state']}\nT:{state['tool']:.1f} /{state['tool_target']:.1f} "
                     f"B:{state['bed']:.1f} /{state['bed_target']:.1f}", state)
         if verb == 'm114':
-            if self.platform == 'octoprint':
+            if self.platform == 'octoprint' and not self.main_variant:
                 before = self._request('GET', '/api/plugin/honeyprint_audit').get('position_sequence', 0)
                 self._send_gcode('M114')
                 deadline = time.monotonic() + 3
