@@ -70,6 +70,12 @@ def prepare_sources(platforms, octoprint_source, klipper_source, python=None):
             marker = source.parent / 'installed.json'
             if not marker.exists():
                 print('Installing local OctoPrint source ' + digest[:12], flush=True)
+                # A previous failed installation may have left a venv using an
+                # incompatible Python. Rebuild only this generated, unmarked cache.
+                if environment.is_symlink():
+                    raise AdapterError('OctoPrint build environment must not be a symlink')
+                if environment.exists():
+                    shutil.rmtree(environment)
                 subprocess.run([sys.executable, '-m', 'venv', str(environment)], check=True)
                 subprocess.run([str(python), '-m', 'pip', 'install', str(source)], check=True)
                 code = 'import octoprint,json; print(json.dumps({"version":octoprint.__version__}))'
