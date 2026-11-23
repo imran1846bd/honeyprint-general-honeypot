@@ -29,6 +29,12 @@ def classify_event(event) -> tuple[dict, ...]:
             indicators.append(('emergency_stop', 'high', 'An emergency-stop command was observed; review operator intent.'))
         if record['outcome'] == 'rejected':
             indicators.append(('command_rejected', 'low', 'The platform rejected a printer command.'))
+    if record['event_type'] == 'network.connection':
+        indicators.append(('connection_probe', 'low',
+                           f"A connection to the {metadata.get('service', 'printer')} port closed without a request "
+                           '(port scan or service probe).'))
+    if record['event_type'] == 'http.request' and record['action'] == 'INVALID':
+        indicators.append(('malformed_request', 'low', 'A request that is not valid HTTP was sent (service probe).'))
     if record['event_type'] == 'platform.event' and metadata.get('event') in ('Error', 'Disconnected'):
         indicators.append(('platform_interruption', 'medium', 'A platform error or disconnection was observed.'))
     return tuple({

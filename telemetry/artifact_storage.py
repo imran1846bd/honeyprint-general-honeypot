@@ -9,9 +9,9 @@ import threading
 
 class ArtifactStorage:
     def __init__(self, root, *, max_bytes=104857600, max_artifacts=1000, max_file_bytes=1048576):
-        if type(max_bytes) is not int or not 1 <= max_bytes <= 1073741824 or type(max_artifacts) is not int or not 1 <= max_artifacts <= 10000:
+        if (max_bytes is not None and (type(max_bytes) is not int or max_bytes < 1)) or type(max_artifacts) is not int or not 1 <= max_artifacts <= 10000:
             raise ValueError('Invalid artifact retention limits')
-        if type(max_file_bytes) is not int or not 1 <= max_file_bytes <= 1048576:
+        if max_file_bytes is not None and (type(max_file_bytes) is not int or max_file_bytes < 1):
             raise ValueError('Invalid per-file artifact limit')
         self.max_file_bytes = max_file_bytes
         self.max_bytes, self.max_artifacts = max_bytes, max_artifacts
@@ -26,7 +26,7 @@ class ArtifactStorage:
             return self._store(content)
 
     def _store(self, content):
-        if type(content) is not bytes or not 1 <= len(content) <= self.max_file_bytes:
+        if type(content) is not bytes or not content or (self.max_file_bytes is not None and len(content) > self.max_file_bytes):
             raise ValueError('Artifact exceeds the configured per-file byte limit')
         digest = hashlib.sha256(content).hexdigest()
         destination = self.root / (digest + '.gcode')
@@ -34,7 +34,7 @@ class ArtifactStorage:
             if self.read(digest) != content: raise ValueError('Artifact content conflict')
             return {'sha256': digest, 'size_bytes': len(content), 'artifact': destination.name}
         files = list(self.root.glob('*.gcode'))
-        if len(files) >= self.max_artifacts or sum(p.lstat().st_size for p in files) + len(content) > self.max_bytes:
+        if len(files) >= self.max_artifacts or (self.max_bytes is not None and sum(p.lstat().st_size for p in files) + len(content) > self.max_bytes):
             raise ValueError('Artifact retention limit reached')
         fd, name = tempfile.mkstemp(prefix='.pending-', dir=self.root)
         try:
@@ -51,6 +51,42 @@ class ArtifactStorage:
             Path(name).unlink(missing_ok=True)
         return {'sha256': digest, 'size_bytes': len(content), 'artifact': destination.name}
 
+    def store_file(self, source, start, length, expected_digest=None):
+        """Retain a validated file slice without loading the G-code into memory."""
+        if type(start) is not int or type(length) is not int or start < 0 or length < 1:
+            raise ValueError('Invalid artifact range')
+        if self.max_file_bytes is not None and length > self.max_file_bytes:
+            raise ValueError('Artifact exceeds the configured per-file byte limit')
+        with self._lock:
+            files = list(self.root.glob('*.gcode'))
+            if len(files) >= self.max_artifacts or (self.max_bytes is not None and sum(p.lstat().st_size for p in files) + length > self.max_bytes):
+                raise ValueError('Artifact retention limit reached')
+            fd, name = tempfile.mkstemp(prefix='.pending-', dir=self.root)
+            digest = hashlib.sha256()
+            try:
+                # G-code is text, but slicers may write non-UTF-8 comments (e.g. a latin-1 '°').
+                # Only NUL bytes, which never occur in text G-code, are refused.
+                with open(source, 'rb') as input_file, os.fdopen(fd, 'wb') as output:
+                    input_file.seek(start)
+                    remaining = length
+                    while remaining:
+                        chunk = input_file.read(min(1048576, remaining))
+                        if not chunk: raise ValueError('Incomplete G-code content')
+                        if b'\0' in chunk: raise ValueError('Binary content is not G-code text')
+                        digest.update(chunk)
+                        output.write(chunk)
+                        remaining -= len(chunk)
+                    output.flush(); os.fsync(output.fileno())
+                destination = self.root / (digest.hexdigest() + '.gcode')
+                if expected_digest is not None and digest.hexdigest() != expected_digest:
+                    raise ValueError('G-code checksum mismatch')
+                try: os.link(name, destination)
+                except FileExistsError:
+                    if destination.stat().st_size != length: raise ValueError('Artifact content conflict')
+                return {'sha256': digest.hexdigest(), 'size_bytes': length, 'artifact': destination.name}
+            finally:
+                Path(name).unlink(missing_ok=True)
+
     def read(self, digest):
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
             raise ValueError('Invalid artifact identity')
@@ -58,7 +94,7 @@ class ArtifactStorage:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, 'rb') as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode): raise ValueError('Artifact must be a regular file')
-            content = stream.read(self.max_file_bytes + 1)
-        if len(content) > self.max_file_bytes or hashlib.sha256(content).hexdigest() != digest:
+            content = stream.read(None if self.max_file_bytes is None else self.max_file_bytes + 1)
+        if (self.max_file_bytes is not None and len(content) > self.max_file_bytes) or hashlib.sha256(content).hexdigest() != digest:
             raise ValueError('Artifact integrity check failed')
         return content
