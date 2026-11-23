@@ -142,7 +142,7 @@ def build_config(values,base,output):
         elif instance['platform'] == 'klipper':
             instance['klipper_settings'] = platform_values['_klipper_settings']
         if instance_id:instance['id']=instance_id
-        if platform != 'all':instance['services']['web_port']=port(values.get('HONEYPRINT_PORT'),8081)
+        if platform != 'all':instance['services']['web_port']=port(values.get('HONEYPRINT_PORT'),8084)
         if instance['platform']=='custom_lab' and values.get('HONEYPRINT_CUSTOM_CODE'):
             entry=path('HONEYPRINT_CUSTOM_CODE')
             if not entry.is_file() or entry.suffix!='.py':raise ValueError('Custom code must select an existing Python entry file')
@@ -171,11 +171,11 @@ def build_config(values,base,output):
             'custom_python':path('HONEYPRINT_CUSTOM_PYTHON'),
             'custom_health_path':values.get('HONEYPRINT_CUSTOM_HEALTH_PATH') or '/',
             'ssh_enabled':ssh_enabled == 'true', 'ssh_host':ssh_host,
-            'ssh_port':port(values.get('HONEYPRINT_SSH_PORT'),2222),
+            'ssh_port':port(values.get('HONEYPRINT_SSH_PORT'),2223),
             'ssh_username':ssh_username, 'ssh_password':ssh_password,
             'telnet_enabled':telnet_enabled == 'true', 'telnet_host':telnet_host,
             'telnet_port':port(values.get('HONEYPRINT_TELNET_PORT'),2323),
             'telnet_username':telnet_username, 'telnet_password':telnet_password,
             'mqtt_enabled':mqtt_enabled == 'true', 'mqtt_host':mqtt_host,
-            'mqtt_port':port(values.get('HONEYPRINT_MQTT_PORT'),1883),
+            'mqtt_port':port(values.get('HONEYPRINT_MQTT_PORT'),1884),
             'mqtt_username':mqtt_username, 'mqtt_password':mqtt_password}
