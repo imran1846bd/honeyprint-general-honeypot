@@ -1,0 +1,13 @@
+<div class="control-group"
+     title="{{ _('How long to cache the blocklist, in minutes. You should normally not have to change this.') |edq }}">
+    <label class="control-label" for="settings-serverPluginBlocklistTtl">{{ _("Blocklist cache TTL") }}</label>
+    <div class="controls">
+        <div class="input-append">
+            <input type="number"
+                   class="input-mini"
+                   data-bind="value: server_pluginBlocklist_ttl"
+                   id="settings-serverPluginBlocklistTtl">
+            <span class="add-on">min</span>
+        </div>
+    </div>
+</div>

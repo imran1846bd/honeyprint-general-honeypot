@@ -1,0 +1,20 @@
+<div class="control-group"
+     title="{{ _('How long OctoPrint should wait since the last password authentication before asking for reauthentication on security critical changes.') |edq }}">
+    <label class="control-label"
+           for="settings-serverDefaultReauthenticationTimeout">{{ _("Default Reauthentication Timeout") }}</label>
+    <div class="controls">
+        <div class="input-append">
+            <input type="number"
+                   class="input-mini"
+                   data-bind="value: accessControl_defaultReauthenticationTimeout"
+                   id="settings-serverDefaultReauthenticationTimeout"
+                   min="0"
+                   step="1">
+            <span class="add-on">min</span>
+        </div>
+        <label class="label label-important">{{ _("Warning") }}</label>
+        <span class="help-block">
+            {{ _("This allows you to set how long OctoPrint should wait since the last password authentication before asking for password reauthentication on security critical changes. Setting this to 0 will disable reauthentication completely. <strong>This is not recommended!</strong> Instead, choose a high value of e.g. 30 minutes or more if you feel annoyed by otherwise too frequent reauthentication requests.") }}
+        </span>
+    </div>
+</div>

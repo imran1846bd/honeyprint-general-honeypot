@@ -1,0 +1,12 @@
+<div id="drop_overlay"
+     data-bind="visible: loginState.hasPermissionKo(access.permissions.FILES_UPLOAD)">
+    <div id="drop_overlay_background"></div>
+    <div id="drop_overlay_wrapper">
+        <div class="dropzone" id="drop">
+        <span class="text"><i class="fas fa-upload"></i>
+        <br>
+    {{ _("Upload") }}</span>
+</div>
+<div class="dropzone_background" id="drop_background"></div>
+</div>
+</div>

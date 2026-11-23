@@ -1,0 +1,24 @@
+<h3>{{ _("Healthcheck Settings") }}</h3>
+
+<form class="form-horizontal" onsubmit="return false;">
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox"
+                       data-bind="checked: settings.plugins.health_check.ignore_info_results">
+                {{ _("Ignore Hints") }}
+            </label>
+            <span class="help-inline">{{ _("If you don't want to get hints from OctoPrint on possible changes to improve your setup, then check this") }}</span>
+        </div>
+    </div>
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox"
+                       data-bind="checked: settings.plugins.health_check.ignore_warning_results">
+                {{ _("Ignore Warnings") }}
+            </label>
+            <span class="help-inline">{{ _("Ignoring warnings is not recommended, they can turn into issues over time!") }}</span>
+        </div>
+    </div>
+</form>

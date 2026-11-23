@@ -1,0 +1,289 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OctoPrint"
+dynamic = ["version", "license"]
+authors = [
+    {name = "Gina Häußge", email = "gina@octoprint.org"}
+]
+maintainers = [
+    {name = "Gina Häußge", email = "gina@octoprint.org"}
+]
+description = "The snappy web interface for your 3D printer"
+readme = {file = "README.md", content-type = "text/markdown"}
+keywords = [
+    "3dprinting",
+    "3dprinter",
+    "3d-printing",
+    "3d-printer",
+    "octoprint"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Framework :: Flask",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Other Audience",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Natural Language :: German",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: JavaScript",
+    "Topic :: Printing",
+]
+
+requires-python = ">=3.10, <3.15"
+
+dependencies = [
+    # bundled plugins
+    "OctoPrint-FileCheck>=2025.7.23",
+    "OctoPrint-FirmwareCheck>=2025.7.23",
+    "OctoPrint-PiSupport>=2025.7.23",
+
+    # core deps
+    "argon2-cffi>=25.1.0",
+    "Babel>=2.18,<2.19",  # breaking changes can happen on minor version increases
+    "cachelib>=0.13.0,<0.14",
+    "Click>=8.3.2,<9",
+    "colorlog>=6.10.1,<7",
+    "emoji>=2.15.0,<3",
+    "feedparser>=6.0.12,<7",
+    "filetype>=1.2.0,<2",
+    "Flask-Assets>=2.1.0,<3",
+    "Flask-Babel>=4.0.0,<5",
+    "Flask-Login>=0.6.3,<0.7",  # breaking changes can happen on minor version increases
+    "Flask-Limiter>=4.1.1,<4.2",
+    "flask>=3.1.3,<3.2",  # breaking changes can happen on minor version increases (with deprecation warnings)
+    "frozendict>=2.4.7,<3",
+    "gcode-thumbnail-tool>=0.1.3",
+    "html-sanitizer>=2.6.0",
+    "ifaddr>=0.2.0,<0.3",  # breaking changes seem to happen on minor version increases, let's be a bit conservative here
+    "markdown>=3.10.2,<3.11",
+    "netaddr>=1.3.0,<1.4",  # changelog hints at breaking changes on minor version increases
+    "packaging>=26.0",
+    "libpass>=1.9.3,<2",
+    "octoprint-plugin-tool",
+    "pathvalidate>=3.3.1,<4",
+    "psutil>=7.2.2,<8",
+    "pydantic>=2.13.0,<3",
+    "pylru>=1.3.1,<2",
+    "pyserial>=3.5,<4",
+    "pytz",
+    "PyYAML>=6.0.3,<7",  # changelog at https://github.com/yaml/pyyaml/blob/master/CHANGES
+    "requests>=2.33.1,<3",
+    "sarge==0.1.8",
+    "semantic_version>=2.10.0,<3",
+    "sentry-sdk>=2.58.0,<3",
+    "setuptools",
+    "tornado>=6.5.5,<6.6",  # TODO on upgrade to tornado 6.6: adjust octoprint.server.util.header_line_to_dict
+    "watchdog>=6,<7",
+    "websocket-client>=1.9.0,<1.10",  # breaking changes can happen on patch version increases, changelog incomplete
+    "werkzeug>=3.1.8,<3.2",  # breaking changes can happen on minor version increases
+    "wrapt>=2.1.2,<2.2",
+    "zeroconf==0.148",  # breaking changes can happen on minor version increases (despite semantic versioning); newer releases might contain genAI authored code
+    "zipstream-ng>=1.9.0,<2.0.0",
+
+    # vendored deps
+    "blinker>=1.9.0,<1.10.0",  # dependency of flask_principal
+    "regex",  # dependency of awesome-slugify
+    "unidecode",  # dependency of awesome-slugify
+
+    # plugin deps
+    # "OctoPrint-Setuptools>=1.0.3",  # makes sure plugins can import this on setup.py based install
+    "future",  # some plugins might still depend on this but not in their own requirements
+    "wheel",  # makes sure plugins can be built as wheels in OctoPrint's venv, see #4682
+
+    # OS specific deps
+    "appdirs ; sys_platform=='darwin'"
+]
+
+[project.optional-dependencies]
+develop = [
+    # Testing dependencies
+    "ddt",
+    "pytest-doctest-custom>=1.0.0,<2",
+    "pytest>=9.0.3,<10",
+    "time-machine",
+    # formatting, liniting, etc
+    "ruff",
+    # pre-commit
+    "pre-commit",
+    # profiler
+    "pyinstrument",
+    # dev task related
+    "go-task-bin",
+    "pip-check",
+    'tomli>=1.1.0 ; python_version < "3.11"',
+    "tomli-w",
+    "tqdm",
+]
+plugins = [
+    "cookiecutter>=2.7.1,<3",
+]
+docs = [
+    "sphinx>=8.2.3,<9",
+    "sphinx-autobuild>=2024.10.3",
+    "sphinxcontrib-httpdomain>=1.8.1,<2",
+    "sphinx-immaterial>=0.13.5,<1",
+    "myst-parser>=4.0.1,<5",
+    "autodoc_pydantic",
+    "sphinx-reredirects",
+]
+
+[project.scripts]
+octoprint = "octoprint:main"
+
+[project.urls]
+homepage = "https://octoprint.org"
+issues = "https://github.com/OctoPrint/OctoPrint/issues"
+source = "https://github.com/OctoPrint/OctoPrint"
+funding = "https://support.octoprint.org"
+documentation = "https://docs.octoprint.org"
+community = "https://help.octoprint.org"
+
+[tool.setuptools]
+include-package-data = true
+package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = {attr = "octoprint.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["octoprint*"]
+
+[tool.ruff]
+exclude = [
+    # repo specific
+    "src/octoprint/vendor",
+
+    # standard stuff
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+line-length = 90
+indent-width = 4
+
+# Assume Python 3.9
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    "W",
+    # flake-bugbear
+    "B",
+    # pyflakes
+    "F",
+    # isort
+    "I",
+    # pyupgrade
+    "UP",
+]
+extend-select = [
+    # flake8-tidy-imports banned api
+    "TID251",
+]
+ignore = [
+    "E203",
+    "E231",
+    "E265",
+    "E266",
+    "E402",
+    "E501",
+    "E731",
+    "E741",
+    "W605",
+    "UP031",
+    "UP032",
+]
+fixable = ["I", "C4", "E"]
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "octoprint",
+    "octoprint_setuptools",
+    "octoprint_client",
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"cgi".msg = "The cgi module is deprecated, see https://peps.python.org/pep-0594/#cgi."
+"pkg_resources".msg = "pkg_resources has been deprecated for a long time and removed from setuptools 82.0.0"
+"octoprint_setuptools".msg = "octoprint_setuptools has been deprecated in favour of switching plugins over to pyproject.toml, see https://github.com/OctoPrint/octoprint-plugin-tool"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = false
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = "dynamic"
+
+[tool.djlint]
+ignore="H005,H007,H019,H021,H023,H030,H031,T002"
+max_blank_lines=1
+use_gitignore=true
+
+[tool.codespell]
+skip = '*.po,*.min.js,.git,*/vendor/*,*/lib/*,*/bootstrap/*,*/node_modules/*,*/translations/*,*/venv*,*/.*,*/build/*,*/_build/*,setup.cfg,AUTHORS.md'
+ignore-words = '.codespell_ignore_words'
+quiet-level = 3
+count = true
+
+[tool.check-wheel-contents]
+ignore = 'W002,W004,W009'
