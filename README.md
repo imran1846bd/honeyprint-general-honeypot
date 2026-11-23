@@ -6,27 +6,25 @@ HoneyPrint is a proposed configuration-driven framework for additive manufacturi
 
 ## One configuration and one honeypot URL
 
-HoneyPrint uses one `.env` file to select the honeypot. Choose OctoPrint, Klipper or custom, then run the same launcher. Each single-platform selection serves its own interface at the same address: **http://127.0.0.1:8081**. Keep the port and runtime directory unchanged when switching platforms so the address stays the same and framework evidence accumulates in one place.
+HoneyPrint uses one `.env` file to select the honeypot. Choose OctoPrint, Klipper or custom, then run the same launcher. Each single-platform selection serves its own interface at the same address: **http://127.0.0.1:8081**. Keep the port and runtime directory unchanged when switching platforms so the address stays the same. Managed framework modes write evidence to the shared runtime database.
 
 ```text
 .env
   |
-  +-- HONEYPRINT_PLATFORM=octoprint --> OctoPrint + Virtual Printer
+  +-- HONEYPRINT_PLATFORM=octoprint      --> Native OctoPrint + Virtual Printer
+  +-- HONEYPRINT_PLATFORM=octoprint-main --> OctoPrint Main (bundled simulator)
   +-- HONEYPRINT_PLATFORM=klipper   --> Mainsail + Moonraker + Klipper AVR
   +-- HONEYPRINT_PLATFORM=custom    --> Built-in lab / own code / existing API
                                        |
                                        v
                              http://127.0.0.1:8081
-                                       |
-                                       v
-                      .honeyprint/quickstart/events.sqlite3
 ```
 
 One platform runs at a time in this flow. Changing `.env` takes effect after a restart; it does not replace a running instance automatically.
 
 ## Quick start
 
-Use Python 3.10 through 3.13 on macOS or Linux. Selecting Klipper also requires Docker to be installed and running. Copy the template once if you do not already have an `.env` file:
+Use Python 3.11 through 3.13 on macOS or Linux for the bundled ML model. Selecting OctoPrint Main or Klipper also requires Docker to be installed and running. On a fresh clone, `./run.sh` copies `.env.example` to a private `.env` automatically. You can also copy it yourself before editing settings:
 
 ```bash
 cp .env.example .env
@@ -48,7 +46,15 @@ Start the selected honeypot:
 ./run.sh
 ```
 
-To add the simulated SSH printer console, set these values in `.env` and restart:
+### What a GitHub clone contains
+
+The Git package is prepared to include the framework code, platform configuration, the OctoPrint and Klipper source under `plat/`, and the reviewed v9 model under `models/`. It excludes your `.env`, uploaded files, evidence databases, installed Python environments, Docker images, build caches, and the framework's local test suite. The first run creates `.env` from `.env.example`, installs dependencies, prepares the selected platform, and creates fresh runtime storage in `.honeyprint/`. Internet access is needed for the initial dependency and frontend downloads. Use Ctrl-C to stop the services; the next `./run.sh` reuses prepared local dependencies.
+
+The default template selects OctoPrint at `http://127.0.0.1:8081` and the analyst dashboard at `http://127.0.0.1:8090`. To use Klipper, set `HONEYPRINT_PLATFORM=klipper` in `.env` and ensure Docker is running. To use your own custom backend, select `custom` and configure `configs/platforms/custom.yaml`. Runtime logs remain local and are never part of the GitHub package.
+
+OctoPrint Main serves the bundled `adapters/octoprint -main` application on the loopback address and stores files and logs in its Docker volumes. The same SSH, Telnet, MQTT and analyst settings apply to OctoPrint Main. Its default instance ID is `octo_main_01`, so its MQTT topics start with `honeyprint/octo_main_01/`. Web/API activity, G-code commands, uploads and print state events join companion activity in the shared evidence database when their capture options are enabled. To switch to the native OctoPrint integration, set `HONEYPRINT_PLATFORM=octoprint` and restart `./run.sh`.
+
+To add the simulated SSH printer console in a managed framework mode, set these values in `.env` and restart:
 
 ```dotenv
 HONEYPRINT_SSH_ENABLED=true
@@ -58,13 +64,13 @@ HONEYPRINT_SSH_USERNAME=admin
 HONEYPRINT_SSH_PASSWORD=admin
 ```
 
-In another terminal, connect with `ssh -p 2223 admin@127.0.0.1` and enter the configured password. `help` lists the supported virtual-printer commands. You can upload a UTF-8 G-code file with `upload demo.gcode`, paste its lines, and finish with a single `.` line; then run `files`, `select demo.gcode`, `start`, and `job`. For a local file, use `ssh -p 2223 admin@127.0.0.1 'upload demo.gcode' < examples/console_demo.gcode`. The console controls the selected managed virtual printer through its local API; it never runs a host shell. Authentication, command names, and upload metadata enter the shared evidence database without passwords or G-code content. The SSH host key remains private under the runtime directory.
+In another terminal, connect with `ssh -p 2223 admin@127.0.0.1` and enter the configured password. `help` lists the supported virtual-printer commands. You can upload a G-code file (`.gcode`, `.gco`, `.g` or `.nc`; slicer names such as `Benchy [0.2mm] #2.gcode` are fine) with `upload demo.gcode`, paste its lines, and finish with a single `.` line; then run `files`, `select demo.gcode`, `start`, and `job`. For a local file, use `ssh -p 2223 admin@127.0.0.1 'upload demo.gcode' < examples/console_demo.gcode`. The console controls the selected managed virtual printer through its local API; it never runs a host shell. Authentication, command names, and upload metadata enter the shared evidence database without passwords or G-code content. The SSH host key remains private under the runtime directory.
 
 To add Telnet, set `HONEYPRINT_TELNET_ENABLED=true` in `.env` and restart. Connect with `telnet 127.0.0.1 2323` (or `nc 127.0.0.1 2323`) and use the same virtual-printer commands as SSH, including pasted G-code upload. Both consoles share the selected printer, files, job, and evidence database. Telnet credentials are transmitted without encryption, so its default listener is restricted to `127.0.0.1`.
 
 For a manual test without editing `.env`, run `HONEYPRINT_TELNET_ENABLED=true ./run.sh` in the project directory. After it reports readiness, run `telnet 127.0.0.1 2323` in a second terminal. Enter the configured username and password (both `admin` by default), then try `help`, `status`, `M105`, `M115` and `exit`. Stop the launcher with Ctrl-C when finished.
 
-The optional MQTT companion is configured by `HONEYPRINT_MQTT_ENABLED`, `HONEYPRINT_MQTT_HOST`, `HONEYPRINT_MQTT_PORT`, `HONEYPRINT_MQTT_USERNAME`, and `HONEYPRINT_MQTT_PASSWORD`. It implements a bounded MQTT 3.1.1 subset. Subscribe to `honeyprint/<instance-id>/#`; publish supported printer commands to `honeyprint/<instance-id>/command` and UTF-8 G-code bytes to `honeyprint/<instance-id>/upload/NAME.gcode`. Responses and live state/temperature updates appear on the corresponding topics. For the current local port and a complete example, see [commands.md](commands.md). MQTT routes commands to the same selected managed virtual printer as SSH and Telnet, and stores interaction metadata in the common evidence database. It does not implement MQTT 5, QoS 2, persistent sessions, or a general-purpose broker.
+The optional MQTT companion is configured by `HONEYPRINT_MQTT_ENABLED`, `HONEYPRINT_MQTT_HOST`, `HONEYPRINT_MQTT_PORT`, `HONEYPRINT_MQTT_USERNAME`, and `HONEYPRINT_MQTT_PASSWORD`. It implements a bounded MQTT 3.1.1 subset. Subscribe to `honeyprint/<instance-id>/#`; publish supported printer commands to `honeyprint/<instance-id>/command` and G-code bytes to `honeyprint/<instance-id>/upload/NAME.gcode`. Responses and live state/temperature updates appear on the corresponding topics. For the current local port and a complete example, see [commands.md](commands.md). MQTT routes commands to the same selected managed virtual printer as SSH and Telnet, and stores interaction metadata in the common evidence database. It does not implement MQTT 5, QoS 2, persistent sessions, or a general-purpose broker.
 
 Open **http://127.0.0.1:8081**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
 
@@ -75,6 +81,7 @@ Change `HONEYPRINT_PLATFORM`, stop the current run, then launch again:
 | Selection | Honeypot at the common URL |
 | --- | --- |
 | `octoprint` | Native OctoPrint with its Virtual Printer and managed audit capture |
+| `octoprint-main` | Bundled OctoPrint Main simulator from `adapters/octoprint -main` |
 | `klipper` | Mainsail with Moonraker and Klipper running compiled AVR firmware through SimulAVR |
 | `custom`, with code and API fields blank | Built-in custom printer lab |
 | `custom`, with `code` in `configs/platforms/custom.yaml` | Your Python HTTP honeypot behind the evidence bridge |
@@ -153,6 +160,12 @@ HONEYPRINT_DASHBOARD_PORT=8090
 
 The terminal prints its URL and port after readiness. Open http://127.0.0.1:8090 to review the selected platform's interactions and print-job evidence. OctoPrint, Klipper and custom use the same evidence and analysis database paths when selected; records retain their platform and instance IDs. Set `HONEYPRINT_ANALYST_ENABLED=false` or use `--no-analyst` to run without the dashboard; evidence capture continues.
 
+### Optional live ML classification
+
+The repository includes `models/HoneyPrint_ATTACK_Model_v9.zip`, and `.env.example` selects it with `HONEYPRINT_ML_MODEL_ZIP=models/HoneyPrint_ATTACK_Model_v9.zip`. Restart `./run.sh` after changing the model path. The launcher checks the archive and starts the model worker after evidence storage is ready. It installs the pinned packages in `requirements-ml.txt` into the local environment if needed. The dashboard's **Attack classification** column and CSV download then include the model's section, subsection, confidence and review status as each stored interaction is processed. The `/api/live` and `/api/events` responses include an `ml_prediction` object. All predictions are stored separately in `analysis.sqlite3`; raw events in `events.sqlite3` are unchanged.
+
+The **AM process mapping** column uses explicit event and route rules. The v9 classifier proposes ATT&CK technique IDs; low-confidence or unsupported event types use transparent classification rules. Routine honeypot use is mapped to its closest observable technique, which does not establish attacker intent. The model was trained on controlled scenarios, so its confidence is not proof of an attack. Keep new private models and runtime evidence under `.honeyprint/`; only the reviewed starter model is bundled. Stop the current run with Ctrl-C before replacing the model or changing this setting.
+
 ## Profiles and advanced configuration
 
 `HONEYPRINT_PROFILE`, `HONEYPRINT_WIDTH`, `HONEYPRINT_DEPTH`, `HONEYPRINT_HEIGHT`, `HONEYPRINT_NOZZLE` and `HONEYPRINT_HEATED_BED` configure validated printer profile values. The common template supplies explicit geometry defaults (220 × 220 × 250 mm, 0.4 mm nozzle, heated bed). Blank geometry values remain supported to inherit a selected profile. Current profiles describe single-extruder rectangular geometry; new motion/thermal/sensor models are not introduced by these controls.
@@ -165,7 +178,7 @@ Existing YAML configurations remain available through `./run.sh --config /path/t
 
 Use `./run.sh --duration 30` for a bounded run. `--no-bootstrap` requires already prepared dependencies, and `--octoprint-python` selects an existing OctoPrint interpreter. Startup waits for persisted lifecycle readiness; when enabled, it also checks the analyst dashboard before reporting readiness. A failed startup shuts down owned children and returns a nonzero exit code.
 
-## Common printer, storage and ingress options
+## Common printer and storage options
 
 The common `.env` also supports these options; restart to apply changes:
 
@@ -173,16 +186,13 @@ The common `.env` also supports these options; restart to apply changes:
 | --- | --- | --- |
 | `HONEYPRINT_PRINTER_NAME` | HoneyPrint Virtual Lab | Shared profile name; OctoPrint appearance/profile, built-in lab title/state, custom-process profile contract and Klipper bridge profile endpoint. Does not rename an external API or Mainsail's own UI preferences. |
 | `HONEYPRINT_ARTIFACT_DIR` | `auto` | `<runtime>/artifacts`, or an explicit absolute/path relative to `.env`; each instance has a subdirectory. All framework artifact stores use it. No automatic migration. |
-| `HONEYPRINT_UPLOAD_MAX_BYTES` | 1048576 | Upload admission limit. OctoPrint native upload setting; Klipper decoded file limit plus bounded multipart framing; lab JSON job body and custom proxy upload bodies. Existing parser/retention ceilings still apply. |
-| `HONEYPRINT_REQUEST_MAX_BYTES` | 65536 | Normal HTTP request-body limit in managed OctoPrint, Klipper bridge, lab and custom proxy; not a WebSocket frame or response-size setting. |
-| `HONEYPRINT_DISK_WARNING_BYTES` | 1073741824 | Warn on low free space at runtime/artifact locations, once per low-space episode. `0` disables. Never deletes files or shuts the machine down. |
 | `HONEYPRINT_PREHEAT_HOTEND_C` / `HONEYPRINT_PREHEAT_BED_C` | 200 / 60 | User-activated targets, not startup heating or physical temperature ceilings. OctoPrint Temperature preset; lab Preheat button/`POST /api/preheat` with `{}`; Klipper `POST /printer/honeyprint/preheat` with `{}`. A printer without a heated bed skips the bed command. |
 | `HONEYPRINT_CAMERA_ENABLED` | true | Allow the managed OctoPrint camera when available; false disables it. Other backends do not gain a framework camera from this flag. |
 | `HONEYPRINT_CAMERA_SOURCE` | `auto` | Preserve source helper/video selection. OctoPrint can use a local video with its source camera helper or an HTTP(S) stream URL. URL display does not verify remote stream availability or add snapshot support. Explicit sources are rejected for other backends. |
 
-`GET /server/honeyprint/profile` exposes the selected shared profile through the Klipper HTTP bridge. Generic custom code receives the profile JSON as before; external APIs retain control of their own printer identity and heaters. Read-only attached OctoPrint does not apply camera, preheat or ingress overrides; non-default values are rejected. Non-default preheat settings for custom code/API deployments are rejected because those deployments have no standard heater command contract. Their unchanged default preset values are inactive.
+`GET /server/honeyprint/profile` exposes the selected shared profile through the Klipper HTTP bridge. Generic custom code receives the profile JSON as before; external APIs retain control of their own printer identity and heaters. Read-only attached OctoPrint does not apply camera or preheat overrides; non-default values are rejected. Non-default preheat settings for custom code/API deployments are rejected because those deployments have no standard heater command contract. Their unchanged default preset values are inactive.
 
-Request limits apply at the owned HTTP entry point, not to direct requests to an external upstream. The custom proxy classifies multipart/form-data and application/octet-stream bodies as uploads; other bodies use the request limit. Artifact retention is distinct from upload admission. A lower retention limit can reject an otherwise size-valid Klipper/lab artifact upload. Missing parent directories for retained artifacts are created on first store preparation.
+Built-in request and artifact limits remain in `core/runtime_settings.py`; they are intentionally omitted from the small common template. Advanced YAML can override supported runtime settings after validation. These limits apply at the owned HTTP entry point, not to direct requests to an external upstream. Artifact retention is distinct from upload admission. Missing parent directories for retained artifacts are created on first store preparation.
 
 ## Common runtime controls
 
@@ -196,13 +206,13 @@ Every active assignment in `.env.example` is wired to a consumer. `.env` holds c
 | Health and collector intervals | Independently schedule health checks and evidence draining |
 | Capture flags | Filter supported observations; framework lifecycle evidence is always persisted |
 | Queue/batch/drain limits | Configure common queue and collection work; overflow or undrained shutdown evidence fails the run |
-| Artifact limits | Per framework artifact store, not a platform disk quota; per-file limit is 1 byte–1 MiB due to current G-code ingestion limits |
+| Artifact limits | Per framework artifact store, not a platform disk quota. The adapters treat the built-in default size values as unbounded and retain up to 1000 artifacts; explicit limits are validated in `core/runtime_settings.py` |
 | Analysis options | Enable/disable analysis and set its polling interval/batch size |
 | Analyst options | Enable/disable UI and set port, pagination, connection timeout and startup wait |
 
 Changing runtime paths or database names starts using the new destination; old evidence is retained and is not automatically migrated. Restart after changing configuration. No upload is executed as framework code unless explicitly selected as trusted custom code in its platform YAML.
 
-Generated YAML carries these controls in its validated `runtime` mapping. Explicit `--config` uses that YAML's `runtime` mapping (or defaults), bypassing `.env` selection. Values outside the ranges documented in `.env.example` fail before dependency bootstrap. Platform-specific `.yaml` files are configuration data, never Python imports.
+Generated YAML carries these controls in its validated `runtime` mapping. Explicit `--config` uses that YAML's `runtime` mapping (or defaults), bypassing `.env` selection. Values outside the ranges in `core/runtime_settings.py` fail before dependency bootstrap. Platform-specific `.yaml` files are configuration data, never Python imports.
 
 ## Use your local platform source
 
@@ -416,164 +426,67 @@ Planned deployment boundaries include isolated networks, explicitly approved exp
 
 ## 9. Repository layout
 
-The academic document suggests logical directories such as `simulators/`, `manufacturing/` and `recipes/`. In the current repository, these map to `plugins/simulators/`, `plugins/manufacturing/` and the implemented `recipes/` directory. The earlier `deployment/recipes/` directory remains reserved. The read-only Moonraker client is under `adapters/klipper/`, while `klipper_moonraker/` remains reserved and the custom adapter is under `custom/`; configuration platform IDs remain `klipper` and `custom_lab`.
+The academic document's simulator and manufacturing components are implemented under `plugins/`. The main directories used by the launcher are:
 
 ```text
 honeyprint-general-honeypot/
-├── adapters/
-│   ├── custom/
-│   │   └── lab_adapter.py
-│   ├── klipper/
-│   │   └── moonraker_client.py
-│   ├── klipper_moonraker/
-│   ├── octoprint/
-│   │   ├── adapter.py
-│   │   └── audit_plugin.py
-│   └── base_adapter.py
+├── .env.example              # Common configuration template
 ├── configs/
-│   ├── instances/
-│   │   ├── custom.yaml
-│   │   ├── klipper.yaml
-│   │   └── octoprint.yaml
-│   ├── profiles/
-│   │   ├── manufacturing/
-│   │   ├── printers/
-│   │   └── virtual_lab.yaml
-│   └── framework.yaml
-├── core/
-│   ├── builtin_registry.py
-│   ├── config_loader.py
-│   ├── dependency_resolver.py
-│   ├── event_bus.py
-│   ├── instance_builder.py
-│   ├── lifecycle_manager.py
-│   ├── manufacturing_service.py
-│   ├── plugin_registry.py
-│   ├── profile_loader.py
-│   ├── runtime.py
-│   ├── state_manager.py
-│   └── validator.py
-├── dashboard/
-│   └── server.py
-├── deployment/
-│   ├── control.py
-│   ├── docker/
-│   ├── recipes/
-│   └── environment_manager.py
-├── examples/
-├── plugins/
-│   ├── custom/
-│   ├── firmware/
-│   ├── manufacturing/
-│   │   ├── build_execution.py
-│   │   ├── build_preparation.py
-│   │   ├── inspection.py
-│   │   ├── job_intake.py
-│   │   ├── pipeline.py
-│   │   └── post_processing.py
-│   ├── security/
-│   ├── services/
-│   └── simulators/
-│       ├── extrusion.py
-│       ├── motion.py
-│       ├── printer.py
-│       ├── sensors.py
-│       └── thermal.py
-├── recipes/
-│   └── octoprint.py
-├── sdk/
-│   └── extensions.py
-├── telemetry/
-│   ├── analysis/
-│   │   ├── alerts.py
-│   │   ├── evidence.py
-│   │   ├── rules.py
-│   │   └── service.py
-│   ├── storage/
-│   ├── artifact_storage.py
-│   ├── collector.py
-│   ├── normalizer.py
-│   └── sqlite_storage.py
-├── tests/
-│   ├── test_artifact_storage.py
-│   ├── test_manufacturing_simulation.py
-│   ├── test_manufacturing_service.py
-│   ├── test_moonraker_client.py
-│   ├── test_extensions_and_analysis.py
-│   ├── test_lifecycle.py
-│   ├── test_octoprint_integration.py
-│   ├── test_planning.py
-│   ├── test_profiles.py
-│   └── test_telemetry.py
-├── .gitignore
-├── README.md
-├── requirements.txt
-├── requirements-octoprint.txt
-└── main.py
+│   ├── instances/            # Advanced multi-instance YAML
+│   ├── platforms/            # OctoPrint, Klipper and custom settings
+│   ├── profiles/             # Shared printer profile
+│   └── reference/            # Classification reference tables
+├── plat/
+│   ├── OctoPrint-dev/        # Selected local OctoPrint source
+│   └── klipper-master/       # Selected local Klipper source
+├── adapters/                 # Platform adapters, bridges and OctoPrint Main
+├── core/                     # Validation, lifecycle and runtime
+├── deployment/               # Bootstrap and managed environments
+├── plugins/                  # Simulator and manufacturing stages
+├── services/                 # SSH, Telnet, MQTT and printer control
+├── telemetry/                # Capture, storage, analysis and ML
+├── dashboard/                # Analyst web interface
+├── docs/images/              # General framework architecture figure
+├── models/                   # Reviewed starter model
+├── examples/                 # Example backends and G-code
+├── gcode/                    # Bundled sample prints
+├── research/                 # Dataset and training utilities
+├── sdk/                      # Extension registration contract
+├── run.sh                    # Recommended launcher
+├── commands.md               # Console command examples
+├── quickstart.py             # Launch supervision
+└── main.py                   # Core CLI
 ```
 
-Empty directories are tracked with `.gitkeep`, omitted above.
+This is an overview of the main directories; generated `.honeyprint/`, `.venv/` and the private `.env` are excluded from Git.
 
-## Getting started
+## Run from a fresh clone
 
 ```bash
 git clone https://github.com/imran1846bd/honeyprint-general-honeypot.git
 cd honeyprint-general-honeypot
+./run.sh
 ```
 
-Install the YAML dependency and run the shared configuration checks:
+The launcher creates a private `.env` from `.env.example` if needed, installs its pinned Python dependencies and prepares the selected platform. The default selection is OctoPrint on `http://127.0.0.1:8081`; the analyst dashboard is on `http://127.0.0.1:8090`. Keep the terminal open while the honeypot runs, and press Ctrl-C to stop it. Edit `.env` and restart to switch platforms or ports. The GitHub package excludes the framework's local test suite.
+
+### Advanced direct core launch
+
+For custom integrations, `main.py` accepts explicit YAML rather than the `.env` quickstart flow. Validate before launching and use the same runtime directory when stopping:
 
 ```bash
-python -m pip install -r requirements.txt
-python main.py validate configs/framework.yaml
-python -m unittest discover -s tests -v
+./.venv/bin/python main.py validate configs/instances/custom.yaml
+./.venv/bin/python main.py run configs/instances/custom.yaml --runtime-dir .honeyprint/custom-demo
+./.venv/bin/python main.py stop --runtime-dir .honeyprint/custom-demo
 ```
 
-The default configuration has no instances. Built-in registrations are explicit Python factories; custom startup code can pass its own populated registry to `main()`. YAML cannot import or execute uploaded code.
-
-### Run the local OctoPrint prototype
-
-Use Python 3.10–3.13 on macOS or Linux. The verified runtime uses Python 3.13 and OctoPrint 1.11.8. Install OctoPrint into a separate environment; framework preparation checks its version and does not run pip automatically.
-
-```bash
-python3 -m venv .venv-octoprint
-.venv-octoprint/bin/python -m pip install -r requirements-octoprint.txt
-python main.py plan configs/instances/octoprint.yaml --octoprint-python .venv-octoprint/bin/python
-python main.py run configs/instances/octoprint.yaml --octoprint-python .venv-octoprint/bin/python
-```
-
-The managed Web UI listens at `http://127.0.0.1:8081`. Research login credentials are generated in `.honeyprint/octo_01/credentials.json`, with private file permissions. Keep that runtime directory outside version control. Runtime data includes the owned OctoPrint configuration, its logs, and `.honeyprint/events.sqlite3`.
-
-Stop from another terminal, or press Ctrl-C in the running terminal:
-
-```bash
-python main.py stop
-```
-
-The stop command acknowledges a shutdown request; the running process confirms final cleanup and telemetry drain. For a bounded smoke run, append `--duration 5`. For a separate runtime directory, pass the same `--runtime-dir` to run and stop. An exclusive instance lock prevents concurrent ownership of one basedir.
-
-Readiness requires the pinned server version, the selected VIRTUAL connection and profile, a temperature response, a live audit observer with no reported drops/errors, and lifecycle evidence read back from SQLite. It does not establish physical printer fidelity. This prototype stays on loopback; public network exposure and container/device isolation remain separate deployment work.
-
-The integration uses OctoPrint's documented [Virtual Printer](https://docs.octoprint.org/en/main/development/virtual_printer.html), [connection API](https://docs.octoprint.org/en/main/api/connection.html) and [plugin hooks](https://docs.octoprint.org/en/main/plugins/hooks.html). Audit hooks enqueue minimal records; a worker sends them over an authenticated local UDP channel. Raw command arguments, request bodies, headers and event payloads are omitted. UDP is best-effort; counters expose observed loss, but do not establish lossless capture. Common credential metadata keys are redacted; producers must handle secrets embedded in free text.
-
-### Read-only attachment
-
-Attachment requires an already operational OctoPrint 1.11.8 server on loopback with its Virtual Printer connected and the matching profile selected. Copy the managed example, change deployment to `attach`, and replace instrumentation with `state: true`. Supply an existing user API key through an environment variable and pass `--attach-api-key-env VARIABLE_NAME`. The framework polls state, never installs plugins or reconnects the external printer, and stop only detaches its observer. HTTP and G-code audit flags are rejected in attach mode because that coverage is not implemented.
-
-### Verify persistence and integration
-
-```bash
-python -m unittest discover -s tests -v
-HONEYPRINT_OCTOPRINT_PYTHON="$PWD/.venv-octoprint/bin/python" python -m unittest discover -s tests -v
-```
-
-The default suite skips the real-server test when the optional interpreter is absent. With it enabled, the test launches a real server, observes commands, reads SQLite events, confirms that attach preserves the external process/configuration, requests graceful stop and restarts the owned server. Collector failures retain the pending batch for retry; pending queue records are in memory and must drain before shutdown.
+Managed native OctoPrint is prepared by `./run.sh` from the selected `configs/platforms/octoprint.yaml`; separate manual installation is not required. Read-only attachment to an existing OctoPrint server uses an explicit attach-mode YAML configuration and an API key supplied through an environment variable. It polls state and leaves the external process running; managed audit hooks are unavailable in attach mode. This advanced path does not use the common `.env` platform selection.
 
 ### Run and extend the custom example
 
 ```bash
-python main.py run configs/instances/custom.yaml --runtime-dir .honeyprint/custom-demo
-python main.py stop --runtime-dir .honeyprint/custom-demo
+./.venv/bin/python main.py run configs/instances/custom.yaml --runtime-dir .honeyprint/custom-demo
+./.venv/bin/python main.py stop --runtime-dir .honeyprint/custom-demo
 ```
 
 The example listens on loopback port 8083 and provides `GET /api/state` and `POST /api/command` with a JSON body such as `{"command":"G1 X10 Y20"}`. It accepts a bounded G-code subset: G0/G1 (XYZ/E/F), G28, G90/G91, M82/M83, M104/M140, M105, M112 and G4. Motion advances at the configured feedrate, heaters follow a deterministic first-order response, and extrusion checks temperature and filament availability. Each accepted command advances one simulated second; G4 also advances its explicit virtual duration. These simplified models are not calibrated printer physics or a Klipper MCU backend.
@@ -585,7 +498,7 @@ curl -H 'Content-Type: application/json' http://127.0.0.1:8083/api/job \
   -d '{"gcode":"G28\nM104 S200\nG4 S90\nG1 X10 Y20 E5"}'
 ```
 
-Intake bounds UTF-8 G-code and computes its SHA-256 identity; preparation preflights a detached printer state; execution applies the simulated commands; post-processing turns off heaters and cools; inspection reports process consistency. Stages must be an ordered prefix beginning with intake. Rejected jobs leave printer state unchanged. Inspection does not measure physical part quality. Each completed stage emits normalized evidence with artifact hash and size. Accepted raw G-code is preserved as a private SHA-256-named artifact under `<runtime-dir>/artifacts/<instance-id>/`; uploads cannot execute Python or shell code. Default retention bounds are 100 MiB and 1000 artifacts per instance, with duplicate content reusing its existing file. Integrity checks detect changed content, and reaching a quota rejects new jobs without applying simulated state. Rejected job content is not retained. JSON request bodies are bounded to one MiB; command requests are bounded to 4096 bytes.
+Intake bounds UTF-8 G-code and computes its SHA-256 identity; preparation preflights a detached printer state; execution applies the simulated commands; post-processing turns off heaters and cools; inspection reports process consistency. Stages must be an ordered prefix beginning with intake. Rejected jobs leave printer state unchanged. Inspection does not measure physical part quality. Each completed stage emits normalized evidence with artifact hash and size. Accepted raw G-code is preserved as a private SHA-256-named artifact under `<runtime-dir>/artifacts/<instance-id>/`; uploads cannot execute Python or shell code. With the default limits the store has no fixed size quota (as on Klipper) and keeps up to 1000 artifacts per instance; explicit `HONEYPRINT_ARTIFACT_*` settings still apply. Duplicate content reuses its existing file. Uploads work whether or not manufacturing stages are enabled, and rejected uploads are recorded with their reason. Integrity checks detect changed content, and reaching a quota rejects new jobs without applying simulated state. Rejected job content is not retained. JSON request bodies are bounded to one MiB; command requests are bounded to 4096 bytes.
 
 Sensor fault injection is currently a Python simulation API (`SensorModel.set_fault`), not an exposed network endpoint. Emergency stop disables motion and heaters; the simulated instance must be restarted to restore power.
 
@@ -612,16 +525,16 @@ main(registry=registry)
 
 ### Explore evidence and local rule alerts
 
-After a runtime has created its evidence database:
+For the default launcher, the analyst dashboard starts with the honeypot. Open `http://127.0.0.1:8090`; its databases are `.honeyprint/quickstart/events.sqlite3` and `.honeyprint/quickstart/analysis.sqlite3`. For a manually launched core instance, start the analysis watcher and dashboard with that instance's actual runtime paths:
 
 ```bash
-python -m telemetry.analysis.service --database .honeyprint/events.sqlite3 --alerts .honeyprint/analysis.sqlite3
-python -m dashboard.server --database .honeyprint/events.sqlite3 --alerts .honeyprint/analysis.sqlite3
+./.venv/bin/python -m telemetry.analysis.service --database .honeyprint/custom-demo/events.sqlite3 --alerts .honeyprint/custom-demo/analysis.sqlite3 --watch
+./.venv/bin/python -m dashboard.server --database .honeyprint/custom-demo/events.sqlite3 --alerts .honeyprint/custom-demo/analysis.sqlite3
 ```
 
 The dashboard listens at `http://127.0.0.1:8090`, shows recent access and control interactions first, and refreshes its interaction and finding tables every three seconds. Startup and background polling records are hidden from the default view; the raw `GET /api/events` and findings `GET /api/alerts` APIs remain available. It supports instance/type filters and bounded pagination. **Download all logs (CSV)** exports the complete event history. **Clear captured logs** removes captured events and analysis findings after confirmation while preserving framework lifecycle markers needed by the running service. The clear action is limited to the loopback dashboard and requires its page token; the ordinary query APIs remain read-only.
 
-For ongoing local notifications, run the analysis command with `--watch` alongside the framework. Findings cover denied API access, unknown endpoints, emergency-stop commands, rejected commands and platform interruptions. They are contextual indicators, not confirmed attacks. Checkpoints and deterministic finding IDs prevent duplicate results on restart. No email, messaging service or ML classifier is configured.
+The launcher starts its analysis watcher automatically when `HONEYPRINT_ANALYSIS_ENABLED=true`. Findings cover denied API access, unknown endpoints, emergency-stop commands, rejected commands and platform interruptions. They are contextual indicators, not confirmed attacks. Checkpoints and deterministic finding IDs prevent duplicate results on restart. The optional ML worker is configured separately by `HONEYPRINT_ML_MODEL_ZIP` as described above.
 
 ### Shared manufacturing service
 
@@ -629,7 +542,7 @@ When an instance enables an ordered stage sequence, `FrameworkRuntime` exposes `
 
 This service executes a **shadow simulation**. It does not send commands to OctoPrint, Klipper or physical hardware. The service reports `execution_mode: shadow`, retains accepted G-code artifacts and closes before runtime telemetry cleanup. If an evidence sink rejects a stage, simulated state remains unchanged and further submissions fail until a new service is created; already accepted evidence is not rolled back. The custom `/api/job` endpoint retains its own simulated printer state and job pipeline.
 
-The test suite runs shadow jobs on both the real pinned OctoPrint runtime and the custom HTTP runtime, checks platform-tagged SQLite evidence and rejects submissions after shutdown. There is no public HTTP endpoint for the shared service yet; it is a trusted Python integration API.
+The shadow service supports jobs on the managed OctoPrint runtime and the custom HTTP runtime, with platform-tagged SQLite evidence and shutdown handling. There is no public HTTP endpoint for the shared service yet; it is a trusted Python integration API.
 
 ### Moonraker read-only transport
 
@@ -643,16 +556,17 @@ The Docker image builds pinned Klipper, Moonraker and official SimulAVR sources,
 
 The container runs without root, capabilities, host device mounts or a Docker socket mount, with a read-only root, bounded temporary filesystems and CPU, memory, process and log limits. Its internal Docker network blocks external egress. A concurrent loopback bridge serves verified Mainsail assets and forwards selected native HTTP and live WebSocket JSON-RPC endpoints through Docker exec. Native responses and status notifications originate from Moonraker. Host power/service control and software updates are excluded. Observed routes/status, RPC methods, submitted G-code identifiers and native printer state enter the framework telemetry pipeline; raw command arguments are omitted. Submission evidence does not prove every line of an uploaded file was executed.
 
-Native multipart uploads accept UTF-8 G-code files up to one MiB with simple filenames in the G-code root. The host retains content-addressed evidence before forwarding; successful uploads produce artifact metadata. The container's native G-code files are temporary and disappear on shutdown; retained host evidence survives. Configuration uploads and arbitrary executable files are rejected. Mainsail can upload, list and select G-code and start a native virtual-SD print, then receive live completion/status updates.
+Native multipart uploads accept the same G-code files as a real Moonraker: `.gcode`, `.gco`, `.g` and `.nc`, slicer names with spaces, brackets, `#`, `@`, `,`, `&` or `'`, subfolders, and non-UTF-8 comments; with the default `HONEYPRINT_UPLOAD_MAX_BYTES` there is no fixed size limit. Path traversal, hidden files, quotes, control characters and binary (NUL) content are refused. The host retains content-addressed evidence before forwarding. Every upload attempt leaves a `file.artifact` event: accepted ones with filename, folder, size and SHA-256; rejected ones with the reason, HTTP status, request size and request SHA-256 (or Moonraker's own message, such as overwriting the file being printed). Refused WebSocket RPC calls are recorded with their method and file arguments.
+
+If the emulated MCU shuts down (for example "Timer too close" on dense G-code, or `M112`), HoneyPrint records a `printer.state shutdown` event with Klipper's reason, resets the emulated board, restarts Klipper and records `recovered`, as an operator running `FIRMWARE_RESTART` would; the honeypot stays online. More than 30 automatic restarts in 10 minutes still stops the run. A failed print records Klipper's reason (for example "Move exceeds maximum extrusion"). The container's native G-code files are temporary; accepted named uploads retained on the host are restored to Moonraker when the launcher restarts. Earlier files that were not retained must be uploaded again. Configuration uploads and arbitrary executable files are rejected. Mainsail can upload, list and select G-code and start a native virtual-SD print, then receive live completion/status updates.
 
 Mainsail is pinned to release 2.19.0 with archive SHA-256 `c4d9d96f89851c6ae0709c2f20725447f3fe8c57cf193869b0083441bd93378a`. Bootstrap verifies the archive, limits extraction and rejects unsafe paths. Cached file hashes are checked before serving. The official [Mainsail configuration reference](https://github.com/mainsail-crew/mainsail/blob/master/public/config.json) and [Moonraker file API](https://moonraker.readthedocs.io/en/latest/external_api/file_manager/) describe the native interfaces.
 
 ```bash
-./run.sh --config configs/instances/klipper.yaml
-HONEYPRINT_TEST_KLIPPER=1 .venv/bin/python -m unittest discover -s tests -p test_klipper_runtime.py -v
+HONEYPRINT_PLATFORM=klipper ./run.sh --duration 30
 ```
 
-Real Docker integration tests verify native movement, MCU communication, blocked egress, request/state observations, owned cleanup and restart. Frontend integration verifies served Mainsail assets/configuration, simultaneous WebSocket RPC replies, status subscriptions, upload/download integrity, artifact retention, native print completion and cleanup with an open connection. Browser visual inspection requires local computer-use permissions; automated verification exercises the native interfaces directly. Containers and networks use unique ownership labels; cleanup refuses resources with a different owner.
+This bounded run reports Klipper, Moonraker, MCU and Mainsail readiness, then stops its owned services. The repository's GitHub package omits the local test suite. Containers and networks use unique ownership labels; cleanup refuses resources with a different owner.
 
 ## Implementation sequence
 
@@ -666,4 +580,4 @@ Real Docker integration tests verify native movement, MCU communication, blocked
 
 ## License and citation
 
-No license or citation file has been added yet. License selection and author/publication details remain to be documented. Third-party source code and Mainsail release assets are downloaded into local runtime/image caches, rather than committed to this repository.
+No project-wide license or citation file has been added yet. License selection and author/publication details remain to be documented. The bundled OctoPrint and Klipper source trees retain their own license files; Mainsail release assets are downloaded into local runtime/image caches.
