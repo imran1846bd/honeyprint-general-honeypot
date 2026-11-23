@@ -6,7 +6,7 @@ HoneyPrint is a proposed configuration-driven framework for additive manufacturi
 
 ## One configuration and one honeypot URL
 
-HoneyPrint uses one `.env` file to select the honeypot. Choose OctoPrint, Klipper or custom, then run the same launcher. Each single-platform selection serves its own interface at the same address: **http://127.0.0.1:8081**. Keep the port and runtime directory unchanged when switching platforms so the address stays the same. Managed framework modes write evidence to the shared runtime database.
+HoneyPrint uses one `.env` file to select the honeypot. Choose OctoPrint, Klipper or custom, then run the same launcher. Each single-platform selection serves its own interface at the same address: **http://127.0.0.1:8084**. Keep the port and runtime directory unchanged when switching platforms so the address stays the same. Managed framework modes write evidence to the shared runtime database.
 
 ```text
 .env
@@ -17,7 +17,7 @@ HoneyPrint uses one `.env` file to select the honeypot. Choose OctoPrint, Klippe
   +-- HONEYPRINT_PLATFORM=custom    --> Built-in lab / own code / existing API
                                        |
                                        v
-                             http://127.0.0.1:8081
+                             http://127.0.0.1:8084
 ```
 
 One platform runs at a time in this flow. Changing `.env` takes effect after a restart; it does not replace a running instance automatically.
@@ -34,7 +34,7 @@ Set the following values in `.env`:
 
 ```dotenv
 HONEYPRINT_PLATFORM=octoprint
-HONEYPRINT_PORT=8081
+HONEYPRINT_PORT=8084
 HONEYPRINT_RUNTIME_DIR=.honeyprint/quickstart
 HONEYPRINT_ANALYST_ENABLED=true
 HONEYPRINT_DASHBOARD_PORT=8090
@@ -50,7 +50,7 @@ Start the selected honeypot:
 
 The Git package is prepared to include the framework code, platform configuration, the OctoPrint and Klipper source under `plat/`, and the reviewed v9 model under `models/`. It excludes your `.env`, uploaded files, evidence databases, installed Python environments, Docker images, build caches, and the framework's local test suite. The first run creates `.env` from `.env.example`, installs dependencies, prepares the selected platform, and creates fresh runtime storage in `.honeyprint/`. Internet access is needed for the initial dependency and frontend downloads. Use Ctrl-C to stop the services; the next `./run.sh` reuses prepared local dependencies.
 
-The default template selects OctoPrint at `http://127.0.0.1:8081` and the analyst dashboard at `http://127.0.0.1:8090`. To use Klipper, set `HONEYPRINT_PLATFORM=klipper` in `.env` and ensure Docker is running. To use your own custom backend, select `custom` and configure `configs/platforms/custom.yaml`. Runtime logs remain local and are never part of the GitHub package.
+The default template selects OctoPrint at `http://127.0.0.1:8084` and the analyst dashboard at `http://127.0.0.1:8090`. Optional SSH, Telnet and MQTT listeners use ports 2223, 2323 and 1884 when enabled. To use Klipper, set `HONEYPRINT_PLATFORM=klipper` in `.env` and ensure Docker is running. To use your own custom backend, select `custom` and configure `configs/platforms/custom.yaml`. Runtime logs remain local and are never part of the GitHub package.
 
 OctoPrint Main serves the bundled `adapters/octoprint -main` application on the loopback address and stores files and logs in its Docker volumes. The same SSH, Telnet, MQTT and analyst settings apply to OctoPrint Main. Its default instance ID is `octo_main_01`, so its MQTT topics start with `honeyprint/octo_main_01/`. Web/API activity, G-code commands, uploads and print state events join companion activity in the shared evidence database when their capture options are enabled. To switch to the native OctoPrint integration, set `HONEYPRINT_PLATFORM=octoprint` and restart `./run.sh`.
 
@@ -72,7 +72,7 @@ For a manual test without editing `.env`, run `HONEYPRINT_TELNET_ENABLED=true ./
 
 The optional MQTT companion is configured by `HONEYPRINT_MQTT_ENABLED`, `HONEYPRINT_MQTT_HOST`, `HONEYPRINT_MQTT_PORT`, `HONEYPRINT_MQTT_USERNAME`, and `HONEYPRINT_MQTT_PASSWORD`. It implements a bounded MQTT 3.1.1 subset. Subscribe to `honeyprint/<instance-id>/#`; publish supported printer commands to `honeyprint/<instance-id>/command` and G-code bytes to `honeyprint/<instance-id>/upload/NAME.gcode`. Responses and live state/temperature updates appear on the corresponding topics. For the current local port and a complete example, see [commands.md](commands.md). MQTT routes commands to the same selected managed virtual printer as SSH and Telnet, and stores interaction metadata in the common evidence database. It does not implement MQTT 5, QoS 2, persistent sessions, or a general-purpose broker.
 
-Open **http://127.0.0.1:8081**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
+Open **http://127.0.0.1:8084**. For managed OctoPrint, the local username and password are **admin / admin**. The first launch prepares dependencies for the selected platform; subsequent launches reuse the environment. Initial downloads and builds require internet access and can take several minutes.
 
 ## Switch the platform
 
@@ -87,7 +87,7 @@ Change `HONEYPRINT_PLATFORM`, stop the current run, then launch again:
 | `custom`, with `code` in `configs/platforms/custom.yaml` | Your Python HTTP honeypot behind the evidence bridge |
 | `custom`, with `api_url` in `configs/platforms/custom.yaml` | An HTTP bridge to your already running service |
 
-The URL is controlled by `HONEYPRINT_PORT`, not the platform name. `HONEYPRINT_INSTANCE_ID` optionally gives the instance your own name. Use `auto` (or blank for compatibility) to keep the selected platform's default identity. A new platform implementation that is not built in can use the custom HTTP contract or a registered SDK adapter; entering an arbitrary platform name does not generate its implementation.
+The URL is controlled by `HONEYPRINT_PORT`, not the platform name. The scenario YAML shown below illustrates the design; for a runnable launch use `.env` or the files under `configs/instances/`. `HONEYPRINT_INSTANCE_ID` optionally gives the instance your own name. Use `auto` (or blank for compatibility) to keep the selected platform's default identity. A new platform implementation that is not built in can use the custom HTTP contract or a registered SDK adapter; entering an arbitrary platform name does not generate its implementation.
 
 Keep `./run.sh` running in the foreground of your terminal. Closing that terminal window or tab sends a hangup signal; the launcher then gracefully stops its owned honeypot services and drains pending evidence. Cleanup may take a few seconds. External services selected through a custom API URL remain running.
 
@@ -133,7 +133,7 @@ python: ''
 health_path: /
 ```
 
-The service can run on another port or host, and the URL can include a base path. Users interact with **http://127.0.0.1:8081**; HoneyPrint forwards requests to the configured service and records methods and response status in the shared database. Stopping HoneyPrint closes its local bridge and leaves the external service running. Requests sent directly to the upstream service bypass HoneyPrint capture.
+The service can run on another port or host, and the URL can include a base path. Users interact with **http://127.0.0.1:8084**; HoneyPrint forwards requests to the configured service and records methods and response status in the shared database. Stopping HoneyPrint closes its local bridge and leaves the external service running. Requests sent directly to the upstream service bypass HoneyPrint capture.
 
 Give either a custom code path or API URL. The API URL must not contain credentials, a query or a fragment. The custom bridge supports ordinary HTTP GET, POST, PUT and DELETE, with requests up to 1 MiB and responses up to 2 MiB. WebSocket, continuous video streams and non-HTTP protocols require a dedicated adapter. The native OctoPrint and Klipper integrations have their own platform-specific streaming support.
 
@@ -295,7 +295,7 @@ instances:
     deployment: managed      # managed | attach
     printer_profile: configs/profiles/printers/ender3.yaml
     simulation: virtual_printer
-    services: {web_port: 8081}
+    services: {web_port: 8084}
     stages: [intake, preparation, execution]
 telemetry:
   backend: sqlite
@@ -324,7 +324,7 @@ instances:
     deployment: managed
     printer_profile: configs/profiles/printers/ender3.yaml
     simulation: virtual_printer
-    services: {web_port: 8081}
+    services: {web_port: 8084}
     instrumentation: {plugin: honeyprint_audit, http: true, gcode: true}
 ```
 
@@ -343,7 +343,7 @@ instances:
     simulation: virtual_mcu
     frontend: mainsail
     api: moonraker
-    services: {web_port: 8082}
+    services: {web_port: 8084}
     instrumentation: {moonraker_events: true, gcode: true}
 ```
 
@@ -362,7 +362,7 @@ instances:
     printer_profile: configs/profiles/printers/custom_lab.yaml
     simulation: lab_simulator_v1
     stages: [intake, preparation, execution, postprocessing, inspection]
-    services: {web_port: 8090}
+    services: {web_port: 8084}
     extensions: [quality_records, curing_station]
 ```
 
@@ -468,7 +468,7 @@ cd honeyprint-general-honeypot
 ./run.sh
 ```
 
-The launcher creates a private `.env` from `.env.example` if needed, installs its pinned Python dependencies and prepares the selected platform. The default selection is OctoPrint on `http://127.0.0.1:8081`; the analyst dashboard is on `http://127.0.0.1:8090`. Keep the terminal open while the honeypot runs, and press Ctrl-C to stop it. Edit `.env` and restart to switch platforms or ports. The GitHub package excludes the framework's local test suite.
+The launcher creates a private `.env` from `.env.example` if needed, installs its pinned Python dependencies and prepares the selected platform. The default selection is OctoPrint on `http://127.0.0.1:8084`; the analyst dashboard is on `http://127.0.0.1:8090`. Keep the terminal open while the honeypot runs, and press Ctrl-C to stop it. Edit `.env` and restart to switch platforms or ports. The GitHub package excludes the framework's local test suite.
 
 ### Advanced direct core launch
 
