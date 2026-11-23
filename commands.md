@@ -1,13 +1,12 @@
 # HoneyPrint: SSH, Telnet and MQTT printer commands
 
-The current `.env` selects OctoPrint on port 8084, but `HONEYPRINT_PLATFORM=klipper ./run.sh` selects Klipper for that run. SSH uses 2223, Telnet 2323, and MQTT 1884. The sample username and password are `admin` / `admin`; use the values in `.env` if changed. All three interfaces control the same selected **virtual** printer. Editing `.env` requires stopping and restarting the launcher.
+The default `.env.example` selects OctoPrint on port 8084; `HONEYPRINT_PLATFORM=klipper ./run.sh` selects Klipper for one run. SSH uses 2223, Telnet 2323, and MQTT 1884 **when enabled in `.env`**. Their sample username and password are `admin` / `admin`; use your `.env` values if changed. All three interfaces control the same selected **virtual** printer. Editing `.env` requires stopping and restarting the launcher.
 
 ## Start
 
-Keep this terminal open while using the honeypot:
+First enter the extracted or cloned project folder as described in [README.md](README.md). Keep this terminal open while using the honeypot:
 
 ```bash
-cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
 ./run.sh
 ```
 
@@ -88,10 +87,9 @@ Terminal 1 — subscribe:
 mosquitto_sub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/#' -v
 ```
 
-Terminal 2 — send commands in this order:
+Terminal 2 — enter the same project folder as Terminal 1, then send commands in this order:
 
 ```bash
-cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'connect'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/command' -m 'status'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/octo_01/upload/demo.gcode' -f examples/console_demo.gcode
@@ -111,10 +109,9 @@ Terminal 1 — subscribe:
 mosquitto_sub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/#' -v
 ```
 
-Terminal 2 — send commands in this order:
+Terminal 2 — enter the same project folder as Terminal 1, then send commands in this order:
 
 ```bash
-cd /Users/macairm3/Desktop/HoneyPrintGeneralFramwork
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/command' -m 'status'
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/upload/demo.gcode' -f examples/console_demo.gcode
 mosquitto_pub -h 127.0.0.1 -p 1884 -u admin -P admin -t 'honeyprint/klipper_01/command' -m 'files'
